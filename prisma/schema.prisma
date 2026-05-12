@@ -1,0 +1,188 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PI
+  CO_PI
+  JRF
+  ADMIN
+}
+
+enum GrantType {
+  ARG
+  IRG
+  PM_ECRG
+}
+
+enum ProjectStatus {
+  ACTIVE
+  EXTENDED
+  CLOSED
+  PENDING
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  DELAYED
+}
+
+enum DocumentType {
+  PROPOSAL
+  PROGRESS_REPORT
+  EXPENDITURE_STATEMENT
+  UTILIZATION_CERTIFICATE
+  COMPLETION_REPORT
+  OTHER
+}
+
+enum BudgetCategory {
+  RECURRING
+  NON_RECURRING
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  password     String
+  role         Role     @default(PI)
+  employeeId   String?  @unique
+  institution  String?
+  designation  String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projectsAsPi      Project[]         @relation("ProjectPI")
+  personnelRecords  PersonnelRecord[]
+  uploadedDocuments Document[]
+  createdMilestones Milestone[]
+
+  @@map("users")
+}
+
+model Project {
+  id              String        @id @default(cuid())
+  title           String
+  shortTitle      String?
+  grantType       GrantType
+  sanctionNumber  String        @unique
+  startDate       DateTime
+  endDate         DateTime
+  status          ProjectStatus @default(ACTIVE)
+  hostInstitution String
+  abstractText    String?
+  totalBudget     Decimal       @db.Decimal(15, 2)
+  piId            String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  pi               User              @relation("ProjectPI", fields: [piId], references: [id])
+  milestones       Milestone[]
+  documents        Document[]
+  budgetHeads      BudgetHead[]
+  personnelRecords PersonnelRecord[]
+  expenditures     Expenditure[]
+
+  @@index([piId])
+  @@index([status])
+  @@index([grantType])
+  @@map("projects")
+}
+
+model BudgetHead {
+  id              String         @id @default(cuid())
+  projectId       String
+  category        BudgetCategory
+  headName        String
+  allocatedAmount Decimal        @db.Decimal(15, 2)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  expenditures Expenditure[]
+
+  @@index([projectId])
+  @@map("budget_heads")
+}
+
+model Expenditure {
+  id              String   @id @default(cuid())
+  projectId       String
+  budgetHeadId    String
+  amount          Decimal  @db.Decimal(15, 2)
+  description     String
+  voucherNumber   String?
+  expenditureDate DateTime
+  createdAt       DateTime @default(now())
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgetHead BudgetHead @relation(fields: [budgetHeadId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("expenditures")
+}
+
+model Milestone {
+  id          String          @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  dueDate     DateTime
+  completedAt DateTime?
+  status      MilestoneStatus @default(PENDING)
+  createdById String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([projectId])
+  @@map("milestones")
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  projectId    String
+  uploadedById String
+  title        String
+  documentType DocumentType
+  fileUrl      String
+  fileSize     Int?
+  mimeType     String?
+  createdAt    DateTime     @default(now())
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+
+  @@index([projectId])
+  @@map("documents")
+}
+
+model PersonnelRecord {
+  id        String    @id @default(cuid())
+  projectId String
+  userId    String
+  role      Role
+  joinDate  DateTime
+  endDate   DateTime?
+  stipend   Decimal?  @db.Decimal(10, 2)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@map("personnel_records")
+}
