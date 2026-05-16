@@ -6,11 +6,19 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Seeding database...')
 
-  // Create PI user
-  const pi1 = await prisma.user.upsert({
-    where: { email: 'dr.sharma@iitd.ac.in' },
-    update: { password: await bcrypt.hash('password123', 12) },
-    create: {
+  // Clean up all existing data to avoid duplicates
+  await prisma.expenditure.deleteMany({})
+  await prisma.milestone.deleteMany({})
+  await prisma.document.deleteMany({})
+  await prisma.personnelRecord.deleteMany({})
+  await prisma.budgetHead.deleteMany({})
+  await prisma.project.deleteMany({})
+  await prisma.user.deleteMany({})
+
+  console.log('🧹 Cleaned up existing data')
+
+  const pi1 = await prisma.user.create({
+    data: {
       name: 'Dr. Rajesh Sharma',
       email: 'dr.sharma@iitd.ac.in',
       password: await bcrypt.hash('password123', 12),
@@ -22,11 +30,8 @@ async function main() {
     },
   })
 
-  // Create Co-PI user
-  const copi1 = await prisma.user.upsert({
-    where: { email: 'dr.priya@iitd.ac.in' },
-    update: { password: await bcrypt.hash('password123', 12) },
-    create: {
+  const copi1 = await prisma.user.create({
+    data: {
       name: 'Dr. Priya Mehta',
       email: 'dr.priya@iitd.ac.in',
       password: await bcrypt.hash('password123', 12),
@@ -38,11 +43,8 @@ async function main() {
     },
   })
 
-  // Create JRF user
-  const jrf1 = await prisma.user.upsert({
-    where: { email: 'rahul.jrf@iitd.ac.in' },
-    update: { password: await bcrypt.hash('password123', 12) },
-    create: {
+  const jrf1 = await prisma.user.create({
+    data: {
       name: 'Rahul Kumar',
       email: 'rahul.jrf@iitd.ac.in',
       password: await bcrypt.hash('password123', 12),
@@ -56,11 +58,8 @@ async function main() {
 
   console.log('✅ Users created')
 
-  // Create Project 1 - ARG
-  const project1 = await prisma.project.upsert({
-    where: { sanctionNumber: 'ANRF/ARG/2024/001234' },
-    update: {},
-    create: {
+  const project1 = await prisma.project.create({
+    data: {
       title: 'Development of AI-based Early Detection System for Crop Diseases',
       shortTitle: 'AI Crop Disease Detection',
       grantType: GrantType.ARG,
@@ -75,44 +74,16 @@ async function main() {
     },
   })
 
-  // Create Budget Heads for Project 1
   await prisma.budgetHead.createMany({
     data: [
-      {
-        projectId: project1.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Manpower',
-        allocatedAmount: 1800000,
-      },
-      {
-        projectId: project1.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Consumables',
-        allocatedAmount: 400000,
-      },
-      {
-        projectId: project1.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Travel',
-        allocatedAmount: 200000,
-      },
-      {
-        projectId: project1.id,
-        category: BudgetCategory.NON_RECURRING,
-        headName: 'Equipment',
-        allocatedAmount: 1800000,
-      },
-      {
-        projectId: project1.id,
-        category: BudgetCategory.NON_RECURRING,
-        headName: 'Software',
-        allocatedAmount: 300000,
-      },
+      { projectId: project1.id, category: BudgetCategory.RECURRING, headName: 'Manpower', allocatedAmount: 1800000 },
+      { projectId: project1.id, category: BudgetCategory.RECURRING, headName: 'Consumables', allocatedAmount: 400000 },
+      { projectId: project1.id, category: BudgetCategory.RECURRING, headName: 'Travel', allocatedAmount: 200000 },
+      { projectId: project1.id, category: BudgetCategory.NON_RECURRING, headName: 'Equipment', allocatedAmount: 1800000 },
+      { projectId: project1.id, category: BudgetCategory.NON_RECURRING, headName: 'Software', allocatedAmount: 300000 },
     ],
-    skipDuplicates: true,
   })
 
-  // Create Milestones for Project 1
   await prisma.milestone.createMany({
     data: [
       {
@@ -141,40 +112,20 @@ async function main() {
         createdById: pi1.id,
       },
     ],
-    skipDuplicates: true,
   })
 
-  // Add Personnel for Project 1
-  await prisma.personnelRecord.upsert({
-    where: { projectId_userId: { projectId: project1.id, userId: copi1.id } },
-    update: {},
-    create: {
-      projectId: project1.id,
-      userId: copi1.id,
-      role: Role.CO_PI,
-      joinDate: new Date('2024-04-01'),
-    },
+  await prisma.personnelRecord.create({
+    data: { projectId: project1.id, userId: copi1.id, role: Role.CO_PI, joinDate: new Date('2024-04-01') },
   })
 
-  await prisma.personnelRecord.upsert({
-    where: { projectId_userId: { projectId: project1.id, userId: jrf1.id } },
-    update: {},
-    create: {
-      projectId: project1.id,
-      userId: jrf1.id,
-      role: Role.JRF,
-      joinDate: new Date('2024-04-01'),
-      stipend: 37000,
-    },
+  await prisma.personnelRecord.create({
+    data: { projectId: project1.id, userId: jrf1.id, role: Role.JRF, joinDate: new Date('2024-04-01'), stipend: 37000 },
   })
 
   console.log('✅ Project 1 (ARG) created')
 
-  // Create Project 2 - IRG
-  const project2 = await prisma.project.upsert({
-    where: { sanctionNumber: 'ANRF/IRG/2024/005678' },
-    update: {},
-    create: {
+  const project2 = await prisma.project.create({
+    data: {
       title: 'Quantum Computing Approaches for Drug Discovery and Molecular Simulation',
       shortTitle: 'Quantum Drug Discovery',
       grantType: GrantType.IRG,
@@ -189,44 +140,16 @@ async function main() {
     },
   })
 
-  // Create Budget Heads for Project 2
   await prisma.budgetHead.createMany({
     data: [
-      {
-        projectId: project2.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Manpower',
-        allocatedAmount: 3000000,
-      },
-      {
-        projectId: project2.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Consumables',
-        allocatedAmount: 500000,
-      },
-      {
-        projectId: project2.id,
-        category: BudgetCategory.RECURRING,
-        headName: 'Travel',
-        allocatedAmount: 500000,
-      },
-      {
-        projectId: project2.id,
-        category: BudgetCategory.NON_RECURRING,
-        headName: 'Equipment',
-        allocatedAmount: 4000000,
-      },
-      {
-        projectId: project2.id,
-        category: BudgetCategory.NON_RECURRING,
-        headName: 'Software Licenses',
-        allocatedAmount: 500000,
-      },
+      { projectId: project2.id, category: BudgetCategory.RECURRING, headName: 'Manpower', allocatedAmount: 3000000 },
+      { projectId: project2.id, category: BudgetCategory.RECURRING, headName: 'Consumables', allocatedAmount: 500000 },
+      { projectId: project2.id, category: BudgetCategory.RECURRING, headName: 'Travel', allocatedAmount: 500000 },
+      { projectId: project2.id, category: BudgetCategory.NON_RECURRING, headName: 'Equipment', allocatedAmount: 4000000 },
+      { projectId: project2.id, category: BudgetCategory.NON_RECURRING, headName: 'Software Licenses', allocatedAmount: 500000 },
     ],
-    skipDuplicates: true,
   })
 
-  // Create Milestones for Project 2
   await prisma.milestone.createMany({
     data: [
       {
@@ -254,7 +177,6 @@ async function main() {
         createdById: pi1.id,
       },
     ],
-    skipDuplicates: true,
   })
 
   console.log('✅ Project 2 (IRG) created')
