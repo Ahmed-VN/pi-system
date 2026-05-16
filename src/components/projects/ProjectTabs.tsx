@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { formatCurrency, daysRemaining } from '@/lib/utils'
-import ProgressRing from '@/components/dashboard/ProgressRing'
+import AddMilestoneForm from './AddMilestoneForm'
 
 // ── Types ──────────────────────────────────────────────────
 interface Milestone {
@@ -115,20 +115,41 @@ export default function ProjectTabs({ project }: ProjectTabsProps) {
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Project Details</h3>
               <div className="space-y-3">
-                <div><p className="text-xs text-gray-500">Host Institution</p><p className="text-sm font-medium text-gray-800">{project.hostInstitution}</p></div>
-                <div><p className="text-xs text-gray-500">Start Date</p><p className="text-sm font-medium text-gray-800">{new Date(project.startDate).toLocaleDateString('en-IN')}</p></div>
-                <div><p className="text-xs text-gray-500">End Date</p><p className="text-sm font-medium text-gray-800">{new Date(project.endDate).toLocaleDateString('en-IN')}</p></div>
-                <div><p className="text-xs text-gray-500">Days Remaining</p>
-                  <p className={`text-sm font-bold ${days < 90 ? 'text-red-600' : days < 180 ? 'text-yellow-600' : 'text-green-600'}`}>{days} days</p>
+                <div>
+                  <p className="text-xs text-gray-500">Host Institution</p>
+                  <p className="text-sm font-medium text-gray-800">{project.hostInstitution}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Start Date</p>
+                  <p className="text-sm font-medium text-gray-800">{new Date(project.startDate).toLocaleDateString('en-IN')}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">End Date</p>
+                  <p className="text-sm font-medium text-gray-800">{new Date(project.endDate).toLocaleDateString('en-IN')}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Days Remaining</p>
+                  <p className={`text-sm font-bold ${days < 90 ? 'text-red-600' : days < 180 ? 'text-yellow-600' : 'text-green-600'}`}>
+                    {days} days
+                  </p>
                 </div>
               </div>
             </div>
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Financial Summary</h3>
               <div className="space-y-3">
-                <div><p className="text-xs text-gray-500">Total Budget</p><p className="text-sm font-bold text-gray-800">{formatCurrency(totalBudget)}</p></div>
-                <div><p className="text-xs text-gray-500">Total Expenditure</p><p className="text-sm font-bold text-gray-800">{formatCurrency(totalExpenditure)}</p></div>
-                <div><p className="text-xs text-gray-500">Balance</p><p className="text-sm font-bold text-green-600">{formatCurrency(totalBudget - totalExpenditure)}</p></div>
+                <div>
+                  <p className="text-xs text-gray-500">Total Budget</p>
+                  <p className="text-sm font-bold text-gray-800">{formatCurrency(totalBudget)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Total Expenditure</p>
+                  <p className="text-sm font-bold text-gray-800">{formatCurrency(totalExpenditure)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Balance</p>
+                  <p className="text-sm font-bold text-green-600">{formatCurrency(totalBudget - totalExpenditure)}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -146,6 +167,7 @@ export default function ProjectTabs({ project }: ProjectTabsProps) {
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-800">Milestones ({project.milestones.length})</h3>
+            <AddMilestoneForm projectId={project.id} />
           </div>
           {project.milestones.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
@@ -269,7 +291,10 @@ export default function ProjectTabs({ project }: ProjectTabsProps) {
                     <p className="text-sm font-bold text-gray-800">{formatCurrency(allocated)}</p>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1">
-                    <div className={`h-1.5 rounded-full ${pct > 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                    <div
+                      className={`h-1.5 rounded-full ${pct > 80 ? 'bg-red-500' : 'bg-blue-500'}`}
+                      style={{ width: `${pct}%` }}
+                    />
                   </div>
                   <div className="flex justify-between text-xs text-gray-500">
                     <span>Spent: {formatCurrency(spent)}</span>
