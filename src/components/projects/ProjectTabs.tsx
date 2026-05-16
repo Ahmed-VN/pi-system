@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { formatCurrency, daysRemaining } from '@/lib/utils'
 import AddMilestoneForm from './AddMilestoneForm'
+import MilestoneStatusButton from './MilestoneStatusButton'
 
 // ── Types ──────────────────────────────────────────────────
 interface Milestone {
@@ -185,11 +186,14 @@ export default function ProjectTabs({ project }: ProjectTabsProps) {
                       {m.description && <p className="text-xs text-gray-500 mt-0.5">{m.description}</p>}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${milestoneColor[m.status]}`}>
-                      {m.status.replace('_', ' ')}
-                    </span>
-                    <p className="text-xs text-gray-400 mt-1">{new Date(m.dueDate).toLocaleDateString('en-IN')}</p>
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${milestoneColor[m.status]}`}>
+                        {m.status.replace('_', ' ')}
+                      </span>
+                      <p className="text-xs text-gray-400 mt-1">{new Date(m.dueDate).toLocaleDateString('en-IN')}</p>
+                    </div>
+                    <MilestoneStatusButton milestoneId={m.id} currentStatus={m.status} />
                   </div>
                 </div>
               ))}
