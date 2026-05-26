@@ -65,6 +65,7 @@ model User {
   personnelRecords  PersonnelRecord[]
   uploadedDocuments Document[]
   createdMilestones Milestone[]
+  notifications     Notification[]
 
   @@map("users")
 }
@@ -185,4 +186,20 @@ model PersonnelRecord {
   @@unique([projectId, userId])
   @@index([projectId])
   @@map("personnel_records")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("INFO")
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
 }

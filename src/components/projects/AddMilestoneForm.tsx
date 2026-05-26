@@ -9,9 +9,10 @@ import { Label } from '@/components/ui/label'
 
 interface AddMilestoneFormProps {
   projectId: string
+  onSuccess?: () => void
 }
 
-export default function AddMilestoneForm({ projectId }: AddMilestoneFormProps) {
+export default function AddMilestoneForm({ projectId, onSuccess }: AddMilestoneFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -45,6 +46,7 @@ export default function AddMilestoneForm({ projectId }: AddMilestoneFormProps) {
         setForm({ title: '', description: '', dueDate: '' })
         setOpen(false)
         router.refresh()
+        onSuccess?.()
       }
     } catch {
       toast.error('Something went wrong')

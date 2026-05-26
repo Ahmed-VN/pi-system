@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 
-// GET personnel for a project
+// GET personnel for a project (includes PI as a synthetic entry)
 export async function GET(req: Request) {
   try {
     const session = await auth()
@@ -13,12 +13,50 @@ export async function GET(req: Request) {
 
     if (!projectId) return NextResponse.json({ error: 'Project ID required' }, { status: 400 })
 
+    // Fetch personnel records
     const personnel = await prisma.personnelRecord.findMany({
       where: { projectId },
       include: { user: true },
     })
 
-    return NextResponse.json(personnel)
+    // Fetch project with PI details
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: { pi: true },
+    })
+
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+    // Check if PI is already in personnelRecords (avoid duplicate)
+    const piAlreadyListed = personnel.some((p) => p.userId === project.piId)
+
+    // Inject PI as a synthetic personnel entry if not already present
+    const piEntry = !piAlreadyListed && project.pi
+      ? [{
+          id: `pi-synthetic-${project.piId}`,
+          projectId: project.id,
+          userId: project.piId,
+          role: 'PI',
+          joinDate: project.startDate ?? new Date(),
+          endDate: null,
+          stipend: null,
+          user: {
+            id: project.pi.id,
+            name: project.pi.name,
+            email: project.pi.email,
+            designation: project.pi.designation ?? null,
+            institution: project.pi.institution ?? null,
+            phone: project.pi.phone ?? null,
+            role: project.pi.role,
+            employeeId: project.pi.employeeId ?? null,
+            password: '', // never exposed but satisfies type
+            createdAt: project.pi.createdAt,
+            updatedAt: project.pi.updatedAt,
+          },
+        }]
+      : []
+
+    return NextResponse.json([...piEntry, ...personnel])
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }

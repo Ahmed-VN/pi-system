@@ -7,9 +7,10 @@ import { toast } from 'sonner'
 interface MilestoneStatusButtonProps {
   milestoneId: string
   currentStatus: string
+  onSuccess?: () => void
 }
 
-export default function MilestoneStatusButton({ milestoneId, currentStatus }: MilestoneStatusButtonProps) {
+export default function MilestoneStatusButton({ milestoneId, currentStatus, onSuccess }: MilestoneStatusButtonProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
@@ -25,6 +26,7 @@ export default function MilestoneStatusButton({ milestoneId, currentStatus }: Mi
       if (res.ok) {
         toast.success(`Milestone marked as ${newStatus.replace('_', ' ')}`)
         router.refresh()
+        onSuccess?.()
       } else {
         toast.error('Failed to update milestone')
       }

@@ -4,12 +4,8 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 type Tab = 'login' | 'signup'
 type Role = 'PI' | 'CO_PI' | 'JRF'
-
-// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
@@ -37,22 +33,17 @@ function GoogleIcon() {
   )
 }
 
-// ─── Role Card ────────────────────────────────────────────────────────────────
-
 const roles: { id: Role; label: string; desc: string; icon: string }[] = [
   { id: 'PI', label: 'Principal Investigator', desc: 'Lead researcher & project head', icon: '🎓' },
   { id: 'CO_PI', label: 'Co-Investigator', desc: 'Collaborative research partner', icon: '🔬' },
   { id: 'JRF', label: 'Junior Research Fellow', desc: 'Research scholar & fellow', icon: '📚' },
 ]
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
 export default function AuthPage() {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('login')
   const [dark, setDark] = useState(false)
 
-  // Login state
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [showLoginPw, setShowLoginPw] = useState(false)
@@ -60,7 +51,6 @@ export default function AuthPage() {
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
 
-  // Signup state
   const [signupData, setSignupData] = useState({
     name: '', email: '', password: '', confirmPassword: '',
     department: '', institution: '', role: '' as Role | '',
@@ -72,13 +62,15 @@ export default function AuthPage() {
   const [signupSuccess, setSignupSuccess] = useState(false)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
-  // ── Login ──────────────────────────────────────────────────────────────────
-
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoginLoading(true)
     setLoginError('')
-    const result = await signIn('credentials', { email: loginEmail, password: loginPassword, redirect: false })
+    const result = await signIn('credentials', {
+      email: loginEmail,
+      password: loginPassword,
+      redirect: false,
+    })
     if (result?.error) {
       setLoginError('Invalid email or password. Please try again.')
       setLoginLoading(false)
@@ -86,8 +78,6 @@ export default function AuthPage() {
       router.push('/dashboard')
     }
   }
-
-  // ── Signup ─────────────────────────────────────────────────────────────────
 
   function validateSignup() {
     const errs: Record<string, string> = {}
@@ -108,7 +98,7 @@ export default function AuthPage() {
     setSignupLoading(true)
     setSignupError('')
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,17 +111,23 @@ export default function AuthPage() {
         }),
       })
       const data = await res.json()
-      if (!res.ok) { setSignupError(data.error || 'Registration failed'); setSignupLoading(false) }
-      else { setSignupSuccess(true); setTimeout(() => { setTab('login'); setSignupSuccess(false) }, 2000) }
-    } catch { setSignupError('Network error. Please try again.'); setSignupLoading(false) }
+      if (!res.ok) {
+        setSignupError(data.error || 'Registration failed')
+        setSignupLoading(false)
+      } else {
+        setSignupSuccess(true)
+        setTimeout(() => { setTab('login'); setSignupSuccess(false) }, 2000)
+      }
+    } catch {
+      setSignupError('Network error. Please try again.')
+      setSignupLoading(false)
+    }
   }
 
   function handleSignupChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     setSignupData(p => ({ ...p, [e.target.name]: e.target.value }))
     setValidationErrors(p => { const n = { ...p }; delete n[e.target.name]; return n })
   }
-
-  // ── Styles ─────────────────────────────────────────────────────────────────
 
   const d = dark
   const bg = d ? '#0d0f14' : '#f4f6fb'
@@ -148,9 +144,7 @@ export default function AuthPage() {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@600;700&display=swap');
-
         * { box-sizing: border-box; margin: 0; padding: 0; }
-
         .auth-root {
           font-family: 'DM Sans', sans-serif;
           min-height: 100vh;
@@ -163,7 +157,6 @@ export default function AuthPage() {
           position: relative;
           overflow: hidden;
         }
-
         .auth-root::before {
           content: '';
           position: fixed;
@@ -175,7 +168,6 @@ export default function AuthPage() {
           pointer-events: none;
           border-radius: 50%;
         }
-
         .auth-root::after {
           content: '';
           position: fixed;
@@ -187,7 +179,6 @@ export default function AuthPage() {
           pointer-events: none;
           border-radius: 50%;
         }
-
         .card {
           background: ${card};
           border: 1px solid ${border};
@@ -200,12 +191,10 @@ export default function AuthPage() {
           z-index: 1;
           animation: fadeUp 0.5s cubic-bezier(.22,.68,0,1.2) both;
         }
-
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(24px) scale(0.98); }
           to   { opacity: 1; transform: translateY(0) scale(1); }
         }
-
         .theme-toggle {
           position: fixed;
           top: 20px;
@@ -225,24 +214,7 @@ export default function AuthPage() {
           box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .theme-toggle:hover { transform: scale(1.1); }
-
-        .brand {
-          text-align: center;
-          margin-bottom: 28px;
-        }
-
-        .brand-icon {
-          width: 52px;
-          height: 52px;
-          background: linear-gradient(135deg, #3b6cff 0%, #7c4dff 100%);
-          border-radius: 14px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 16px;
-          box-shadow: 0 8px 24px rgba(59,108,255,0.3);
-        }
-
+        .brand { text-align: center; margin-bottom: 28px; }
         .brand-title {
           font-family: 'Playfair Display', serif;
           font-size: 28px;
@@ -251,7 +223,6 @@ export default function AuthPage() {
           letter-spacing: -0.5px;
           line-height: 1.2;
         }
-
         .brand-sub {
           font-size: 12px;
           color: ${muted};
@@ -261,7 +232,6 @@ export default function AuthPage() {
           margin-left: auto;
           margin-right: auto;
         }
-
         .tabs {
           display: flex;
           background: ${inputBg};
@@ -270,7 +240,6 @@ export default function AuthPage() {
           margin-bottom: 28px;
           border: 1px solid ${inputBorder};
         }
-
         .tab-btn {
           flex: 1;
           padding: 9px;
@@ -284,15 +253,12 @@ export default function AuthPage() {
           background: transparent;
           color: ${muted};
         }
-
         .tab-btn.active {
           background: ${card};
           color: ${text};
           box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
-
         .form-group { margin-bottom: 16px; }
-
         .form-label {
           display: block;
           font-size: 13px;
@@ -300,9 +266,7 @@ export default function AuthPage() {
           color: ${text};
           margin-bottom: 6px;
         }
-
         .input-wrap { position: relative; }
-
         .form-input {
           width: 100%;
           padding: 11px 14px;
@@ -316,18 +280,14 @@ export default function AuthPage() {
           transition: all 0.2s;
           appearance: none;
         }
-
         .form-input::placeholder { color: ${muted}; }
-
         .form-input:focus {
           border-color: ${accent};
           background: ${d ? '#1e2434' : '#fff'};
           box-shadow: 0 0 0 3px rgba(59,108,255,0.12);
         }
-
         .form-input.has-error { border-color: #ef4444; }
         .form-input.has-error:focus { box-shadow: 0 0 0 3px rgba(239,68,68,0.12); }
-
         .pw-toggle {
           position: absolute;
           right: 12px;
@@ -343,17 +303,9 @@ export default function AuthPage() {
           transition: color 0.15s;
         }
         .pw-toggle:hover { color: ${text}; }
-
-        .field-error {
-          font-size: 12px;
-          color: #ef4444;
-          margin-top: 4px;
-        }
-
+        .field-error { font-size: 12px; color: #ef4444; margin-top: 4px; }
         .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
         .role-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
-
         .role-card {
           border: 1.5px solid ${inputBorder};
           border-radius: 10px;
@@ -363,28 +315,22 @@ export default function AuthPage() {
           transition: all 0.18s;
           background: ${inputBg};
         }
-
         .role-card:hover { border-color: ${accent}; background: ${d ? '#1e2737' : '#f0f4ff'}; }
-
         .role-card.selected {
           border-color: ${accent};
           background: ${d ? '#1a2540' : '#eff3ff'};
           box-shadow: 0 0 0 3px rgba(59,108,255,0.12);
         }
-
         .role-icon { font-size: 20px; margin-bottom: 4px; }
         .role-label { font-size: 11px; font-weight: 600; color: ${text}; line-height: 1.2; }
         .role-desc { font-size: 10px; color: ${muted}; margin-top: 2px; line-height: 1.3; }
-
         .role-error { font-size: 12px; color: #ef4444; margin-bottom: 12px; margin-top: -4px; }
-
         .forgot-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
           margin-bottom: 20px;
         }
-
         .remember-label {
           display: flex;
           align-items: center;
@@ -394,14 +340,12 @@ export default function AuthPage() {
           cursor: pointer;
           user-select: none;
         }
-
         .remember-label input[type=checkbox] {
           width: 15px;
           height: 15px;
           accent-color: ${accent};
           cursor: pointer;
         }
-
         .forgot-link {
           font-size: 13px;
           color: ${accent};
@@ -410,7 +354,6 @@ export default function AuthPage() {
           transition: opacity 0.15s;
         }
         .forgot-link:hover { opacity: 0.75; }
-
         .btn-primary {
           width: 100%;
           padding: 12px;
@@ -428,16 +371,9 @@ export default function AuthPage() {
         .btn-primary:hover:not(:disabled) { background: ${accentHover}; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,108,255,0.3); }
         .btn-primary:active { transform: translateY(0); }
         .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
-
-        .divider {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin: 18px 0;
-        }
+        .divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
         .divider-line { flex: 1; height: 1px; background: ${border}; }
         .divider-text { font-size: 12px; color: ${muted}; white-space: nowrap; }
-
         .btn-google {
           width: 100%;
           padding: 11px;
@@ -456,7 +392,6 @@ export default function AuthPage() {
           transition: all 0.18s;
         }
         .btn-google:hover { border-color: ${accent}; background: ${d ? '#1a2540' : '#f5f7ff'}; }
-
         .error-box {
           background: ${d ? '#2d1515' : '#fff5f5'};
           border: 1px solid ${d ? '#5c2020' : '#fecaca'};
@@ -466,7 +401,6 @@ export default function AuthPage() {
           color: ${d ? '#fc8181' : '#dc2626'};
           margin-bottom: 16px;
         }
-
         .success-box {
           background: ${d ? '#0d2d1a' : '#f0fdf4'};
           border: 1px solid ${d ? '#1a5c2a' : '#bbf7d0'};
@@ -477,7 +411,6 @@ export default function AuthPage() {
           margin-bottom: 16px;
           text-align: center;
         }
-
         .footer-text {
           text-align: center;
           font-size: 12px;
@@ -485,10 +418,8 @@ export default function AuthPage() {
           margin-top: 20px;
           line-height: 1.5;
         }
-
         .footer-text a { color: ${accent}; text-decoration: none; font-weight: 500; }
         .footer-text a:hover { text-decoration: underline; }
-
         .section-label {
           font-size: 11px;
           font-weight: 600;
@@ -497,7 +428,6 @@ export default function AuthPage() {
           letter-spacing: 0.8px;
           margin-bottom: 10px;
         }
-
         @media (max-width: 500px) {
           .card { padding: 28px 24px; }
           .row-2 { grid-template-columns: 1fr; }
@@ -506,29 +436,24 @@ export default function AuthPage() {
       `}</style>
 
       <div className="auth-root">
-        {/* Theme Toggle */}
         <button className="theme-toggle" onClick={() => setDark(p => !p)} aria-label="Toggle theme">
           {dark ? '☀️' : '🌙'}
         </button>
 
         <div className="card">
-          {/* Brand */}
           <div className="brand">
             <div className="brand-title">ResearchPilot</div>
             <div className="brand-sub">Research Project Management &amp; Collaboration Platform</div>
           </div>
 
-          {/* Tabs */}
           <div className="tabs">
             <button className={`tab-btn ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>Sign In</button>
             <button className={`tab-btn ${tab === 'signup' ? 'active' : ''}`} onClick={() => setTab('signup')}>Create Account</button>
           </div>
 
-          {/* ── LOGIN ─────────────────────────────────────────────────────────── */}
           {tab === 'login' && (
             <form onSubmit={handleLogin} autoComplete="on">
               {loginError && <div className="error-box">{loginError}</div>}
-
               <div className="form-group">
                 <label className="form-label">Institutional Email</label>
                 <input
@@ -541,7 +466,6 @@ export default function AuthPage() {
                   required
                 />
               </div>
-
               <div className="form-group">
                 <label className="form-label">Password</label>
                 <div className="input-wrap">
@@ -560,7 +484,6 @@ export default function AuthPage() {
                   </button>
                 </div>
               </div>
-
               <div className="forgot-row">
                 <label className="remember-label">
                   <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} />
@@ -568,41 +491,38 @@ export default function AuthPage() {
                 </label>
                 <a href="#" className="forgot-link">Forgot password?</a>
               </div>
-
               <button type="submit" className="btn-primary" disabled={loginLoading}>
                 {loginLoading ? 'Signing in…' : 'Sign In'}
               </button>
-
               <div className="divider">
                 <div className="divider-line" />
                 <span className="divider-text">or continue with</span>
                 <div className="divider-line" />
               </div>
-
               <button type="button" className="btn-google" onClick={() => signIn('google')}>
                 <GoogleIcon />
                 Sign in with Google
               </button>
-
               <div className="footer-text" style={{ marginTop: '16px' }}>
                 No account? <a href="#" onClick={e => { e.preventDefault(); setTab('signup') }}>Create one</a>
               </div>
             </form>
           )}
 
-          {/* ── SIGNUP ────────────────────────────────────────────────────────── */}
           {tab === 'signup' && (
             <form onSubmit={handleSignup} autoComplete="off">
               {signupError && <div className="error-box">{signupError}</div>}
               {signupSuccess && <div className="success-box">✅ Account created! Redirecting to sign in…</div>}
-
               <div className="section-label">Select Your Role</div>
               <div className="role-grid">
                 {roles.map(r => (
                   <div
                     key={r.id}
                     className={`role-card ${signupData.role === r.id ? 'selected' : ''}`}
-                    onClick={() => { setSignupData(p => ({ ...p, role: r.id })); setValidationErrors(p => { const n = { ...p }; delete n.role; return n }) }}
+                    onClick={() => {
+                      setSignupData(p => ({ ...p, role: r.id }))
+                      setValidationErrors(p => { const n = { ...p }; delete n.role; return n })
+                    }}
                   >
                     <div className="role-icon">{r.icon}</div>
                     <div className="role-label">{r.label}</div>
@@ -611,7 +531,6 @@ export default function AuthPage() {
                 ))}
               </div>
               {validationErrors.role && <div className="role-error">{validationErrors.role}</div>}
-
               <div className="form-group">
                 <label className="form-label">Full Name</label>
                 <input
@@ -625,7 +544,6 @@ export default function AuthPage() {
                 />
                 {validationErrors.name && <div className="field-error">{validationErrors.name}</div>}
               </div>
-
               <div className="form-group">
                 <label className="form-label">Institutional Email</label>
                 <input
@@ -639,7 +557,6 @@ export default function AuthPage() {
                 />
                 {validationErrors.email && <div className="field-error">{validationErrors.email}</div>}
               </div>
-
               <div className="row-2">
                 <div className="form-group">
                   <label className="form-label">Password</label>
@@ -660,7 +577,6 @@ export default function AuthPage() {
                   </div>
                   {validationErrors.password && <div className="field-error">{validationErrors.password}</div>}
                 </div>
-
                 <div className="form-group">
                   <label className="form-label">Confirm Password</label>
                   <div className="input-wrap">
@@ -681,7 +597,6 @@ export default function AuthPage() {
                   {validationErrors.confirmPassword && <div className="field-error">{validationErrors.confirmPassword}</div>}
                 </div>
               </div>
-
               <div className="form-group">
                 <label className="form-label">Institution Name</label>
                 <input
@@ -695,9 +610,10 @@ export default function AuthPage() {
                 />
                 {validationErrors.institution && <div className="field-error">{validationErrors.institution}</div>}
               </div>
-
               <div className="form-group">
-                <label className="form-label">Department <span style={{ color: '#8b91a8', fontWeight: 400 }}>(optional)</span></label>
+                <label className="form-label">
+                  Department <span style={{ color: '#8b91a8', fontWeight: 400 }}>(optional)</span>
+                </label>
                 <input
                   className="form-input"
                   name="department"
@@ -707,11 +623,14 @@ export default function AuthPage() {
                   onChange={handleSignupChange}
                 />
               </div>
-
-              <button type="submit" className="btn-primary" disabled={signupLoading || signupSuccess} style={{ marginTop: '4px' }}>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={signupLoading || signupSuccess}
+                style={{ marginTop: '4px' }}
+              >
                 {signupLoading ? 'Creating account…' : 'Create Account'}
               </button>
-
               <div className="footer-text" style={{ marginTop: '16px' }}>
                 Already registered? <a href="#" onClick={e => { e.preventDefault(); setTab('login') }}>Sign in</a>
               </div>
@@ -719,7 +638,7 @@ export default function AuthPage() {
           )}
 
           <div className="footer-text">
-            By continuing you agree to ANRF's <a href="#">Terms</a> &amp; <a href="#">Privacy Policy</a>
+            By continuing you agree to ANRF&apos;s <a href="#">Terms</a> &amp; <a href="#">Privacy Policy</a>
           </div>
         </div>
       </div>

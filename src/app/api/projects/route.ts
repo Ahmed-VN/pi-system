@@ -1,93 +1,104 @@
-import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
-import { prisma } from '@/lib/prisma'
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 
-// GET all projects for logged in PI
-export async function GET() {
-  try {
-    const session = await auth()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+// ─── GET /api/projects ────────────────────────────────────────────────────────
+// Returns all projects the logged-in user is associated with (PI, CO-PI, JRF)
 
-    const projects = await prisma.project.findMany({
-      where: { piId: session.user.id },
-      include: { milestones: true, personnelRecords: true, budgetHeads: true },
-      orderBy: { createdAt: 'desc' },
-    })
+export async function GET(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    return NextResponse.json(projects)
-  } catch (error) {
-    console.error('Projects GET error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
+  const projects = await prisma.project.findMany({
+    where: {
+      OR: [
+        { pi: { email: session.user.email! } },
+        { personnelRecords: { some: { user: { email: session.user.email! } } } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      title: true,
+      shortTitle: true,
+      sanctionNumber: true,
+      grantType: true,
+      status: true,
+      totalBudget: true,
+      startDate: true,
+      endDate: true,
+      hostInstitution: true,
+    },
+  });
+
+  const serialized = projects.map((p) => ({
+    ...p,
+    totalBudget: Number(p.totalBudget),
+    startDate: p.startDate.toISOString(),
+    endDate: p.endDate.toISOString(),
+  }));
+
+  return NextResponse.json(serialized);
 }
 
-// POST create new project
-export async function POST(req: Request) {
-  try {
-    const session = await auth()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+// ─── POST /api/projects ───────────────────────────────────────────────────────
+// Create a new project — PI only (ANRF business rules enforced)
 
-    const body = await req.json()
-    const {
-      title, shortTitle, grantType, sanctionNumber,
-      startDate, endDate, hostInstitution, abstractText,
-      totalBudget, budgetHeads,
-    } = body
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // ANRF Rule: Max 8 projects per PI
-    const totalProjects = await prisma.project.count({
-      where: { piId: session.user.id, status: { in: ['ACTIVE', 'EXTENDED'] } },
-    })
+  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    if (totalProjects >= 8) {
-      return NextResponse.json(
-        { error: 'ANRF limit reached: Maximum 8 simultaneous projects allowed per investigator' },
-        { status: 400 }
-      )
-    }
-
-    // ANRF Rule: Max 4 ARG projects per PI
-    if (grantType === 'ARG') {
-      const argProjects = await prisma.project.count({
-        where: { piId: session.user.id, grantType: 'ARG', status: { in: ['ACTIVE', 'EXTENDED'] } },
-      })
-
-      if (argProjects >= 4) {
-        return NextResponse.json(
-          { error: 'ANRF limit reached: Maximum 4 simultaneous ARG projects allowed' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Create project with budget heads
-    const project = await prisma.project.create({
-      data: {
-        title,
-        shortTitle,
-        grantType,
-        sanctionNumber,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        hostInstitution,
-        abstractText,
-        totalBudget,
-        piId: session.user.id,
-        budgetHeads: {
-          create: budgetHeads || [],
-        },
-      },
-    })
-
-    return NextResponse.json(project, { status: 201 })
-  } catch (error: any) {
-    console.error('Projects POST error:', error)
-    if (error.code === 'P2002') {
-      return NextResponse.json(
-        { error: 'A project with this sanction number already exists' },
-        { status: 400 }
-      )
-    }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  // Only PIs can create projects
+  if (user.role !== "PI") {
+    return NextResponse.json({ error: "Only Principal Investigators can create projects" }, { status: 403 });
   }
+
+  const body = await req.json();
+  const { title, grantType, sanctionNumber, startDate, endDate, hostInstitution, totalBudget, abstractText } = body;
+
+  if (!title || !grantType || !sanctionNumber || !startDate || !endDate || !hostInstitution || !totalBudget) {
+    return NextResponse.json({ error: "All required fields must be provided" }, { status: 400 });
+  }
+
+  // ANRF rule: max 8 active/extended projects per PI
+  const activeCount = await prisma.project.count({
+    where: { piId: user.id, status: { in: ["ACTIVE", "EXTENDED"] } },
+  });
+  if (activeCount >= 8) {
+    return NextResponse.json({ error: "Maximum of 8 active projects allowed" }, { status: 400 });
+  }
+
+  // ANRF rule: max 4 ARG projects per PI
+  if (grantType === "ARG") {
+    const argCount = await prisma.project.count({ where: { piId: user.id, grantType: "ARG" } });
+    if (argCount >= 4) {
+      return NextResponse.json({ error: "Maximum of 4 ARG projects allowed" }, { status: 400 });
+    }
+  }
+
+  const project = await prisma.project.create({
+    data: {
+      title,
+      grantType,
+      sanctionNumber,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      hostInstitution,
+      totalBudget,
+      abstractText: abstractText || null,
+      piId: user.id,
+    },
+  });
+
+  return NextResponse.json({
+    ...project,
+    totalBudget: Number(project.totalBudget),
+    startDate: project.startDate.toISOString(),
+    endDate: project.endDate.toISOString(),
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
+  }, { status: 201 });
 }
