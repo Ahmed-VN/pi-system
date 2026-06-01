@@ -49,6 +49,8 @@ function can(role: string) {
     viewFinancials:    role === "PI" || role === "CO_PI",
     addExpenditure:    role === "PI",
     deleteExpenditure: role === "PI",
+    addBudgetHead:     role === "PI",
+    deleteBudgetHead:  role === "PI",
     uploadDocument:    role === "PI" || role === "CO_PI",
     deleteDocument:    role === "PI",
   };
@@ -59,9 +61,7 @@ function can(role: string) {
 function fmt(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
-function inr(n: number) {
-  return `₹${n.toLocaleString("en-IN")}`;
-}
+function inr(n: number) { return `₹${n.toLocaleString("en-IN")}`; }
 function initials(name: string) {
   return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
@@ -82,12 +82,180 @@ const AVATAR_COLORS = ["#5B4FE9","#7C6FF7","#4CAF50","#2196F3","#FF9800","#E91E6
 type Tab = "overview" | "milestones" | "team" | "financials" | "documents";
 
 const TAB_LABELS: Record<Tab, string> = {
-  overview: "Overview",
-  milestones: "Milestones",
-  team: "Team",
-  financials: "Financials",
-  documents: "Documents",
+  overview: "Overview", milestones: "Milestones", team: "Team",
+  financials: "Financials", documents: "Documents",
 };
+
+// ─── Inline Add Budget Head Form ──────────────────────────────────────────────
+
+function AddBudgetHeadInline({
+  projectId,
+  onSuccess,
+}: {
+  projectId: string;
+  onSuccess: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [headName, setHeadName] = useState("");
+  const [category, setCategory] = useState<"RECURRING" | "NON_RECURRING">("RECURRING");
+  const [allocatedAmount, setAllocatedAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<{ headName?: string; allocatedAmount?: string }>({});
+
+  function validate() {
+    const e: typeof errors = {};
+    if (!headName.trim()) e.headName = "Name is required";
+    if (!allocatedAmount || isNaN(Number(allocatedAmount)) || Number(allocatedAmount) <= 0)
+      e.allocatedAmount = "Enter a valid amount";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function handleSubmit() {
+    if (!validate()) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/budget-heads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          headName: headName.trim(),
+          category,
+          allocatedAmount: Number(allocatedAmount),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Failed to add budget head"); return; }
+      toast.success(`Budget head "${headName}" added`);
+      setHeadName("");
+      setAllocatedAmount("");
+      setCategory("RECURRING");
+      setErrors({});
+      setOpen(false);
+      onSuccess();
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          background: "#EEF2FF", border: "1.5px dashed #A5B4FC",
+          borderRadius: 10, padding: "12px 16px", width: "100%",
+          fontSize: 13, fontWeight: 600, color: "#5B4FE9",
+          cursor: "pointer", textAlign: "center",
+        }}
+      >
+        + Add Budget Head
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      background: "#F9F8FF", border: "1.5px solid #C7D2FE",
+      borderRadius: 12, padding: "16px",
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#5B4FE9", marginBottom: 12 }}>
+        New Budget Head
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {/* Name */}
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
+            Head Name *
+          </label>
+          <input
+            value={headName}
+            onChange={(e) => { setHeadName(e.target.value); setErrors((x) => ({ ...x, headName: undefined })); }}
+            placeholder="e.g. Equipment, Travel, Consumables"
+            style={{
+              width: "100%", marginTop: 4, padding: "8px 12px",
+              border: `1.5px solid ${errors.headName ? "#EF4444" : "#E5E7EB"}`,
+              borderRadius: 8, fontSize: 13, color: "#1A1A2E",
+              background: "white", boxSizing: "border-box", outline: "none",
+            }}
+          />
+          {errors.headName && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.headName}</p>}
+        </div>
+
+        {/* Category + Amount row */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              Category *
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as "RECURRING" | "NON_RECURRING")}
+              style={{
+                width: "100%", marginTop: 4, padding: "8px 12px",
+                border: "1.5px solid #E5E7EB", borderRadius: 8,
+                fontSize: 13, background: "white", cursor: "pointer",
+                boxSizing: "border-box", outline: "none",
+              }}
+            >
+              <option value="RECURRING">Recurring</option>
+              <option value="NON_RECURRING">Non-Recurring</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              Allocated Amount (₹) *
+            </label>
+            <div style={{ position: "relative", marginTop: 4 }}>
+              <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9CA3AF", fontSize: 13 }}>₹</span>
+              <input
+                type="number"
+                min={1}
+                value={allocatedAmount}
+                onChange={(e) => { setAllocatedAmount(e.target.value); setErrors((x) => ({ ...x, allocatedAmount: undefined })); }}
+                placeholder="500000"
+                style={{
+                  width: "100%", padding: "8px 12px 8px 24px",
+                  border: `1.5px solid ${errors.allocatedAmount ? "#EF4444" : "#E5E7EB"}`,
+                  borderRadius: 8, fontSize: 13, color: "#1A1A2E",
+                  background: "white", boxSizing: "border-box", outline: "none",
+                }}
+              />
+            </div>
+            {errors.allocatedAmount && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.allocatedAmount}</p>}
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={() => { setOpen(false); setErrors({}); setHeadName(""); setAllocatedAmount(""); }}
+            disabled={loading}
+            style={{
+              padding: "7px 16px", borderRadius: 8, border: "1.5px solid #E5E7EB",
+              background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            style={{
+              padding: "7px 16px", borderRadius: 8, border: "none",
+              background: "#5B4FE9", fontSize: 13, fontWeight: 600, color: "white", cursor: "pointer",
+            }}
+          >
+            {loading ? "Saving…" : "Add Budget Head"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -140,6 +308,16 @@ export default function ProjectTabs({
     setDeletingId(null);
     if (res.ok) { toast.success("Expenditure deleted"); refresh(); }
     else toast.error("Failed to delete expenditure");
+  }
+
+  async function deleteBudgetHead(id: string) {
+    if (!perms.deleteBudgetHead) return;
+    if (!confirm("Delete this budget head and all its expenditures?")) return;
+    setDeletingId(id);
+    const res = await fetch(`/api/budget-heads?id=${id}`, { method: "DELETE" });
+    setDeletingId(null);
+    if (res.ok) { toast.success("Budget head deleted"); refresh(); }
+    else toast.error("Failed to delete budget head");
   }
 
   async function deletePersonnel(id: string) {
@@ -306,11 +484,7 @@ export default function ProjectTabs({
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                       {perms.updateMilestone && (
-                        <MilestoneStatusButton
-                          milestoneId={m.id}
-                          currentStatus={m.status}
-                          onSuccess={refresh}
-                        />
+                        <MilestoneStatusButton milestoneId={m.id} currentStatus={m.status} onSuccess={refresh} />
                       )}
                       {perms.deleteMilestone && (
                         <button
@@ -415,14 +589,14 @@ export default function ProjectTabs({
         </div>
       )}
 
-      {/* ── Financials (PI and Co-PI only) ── */}
+      {/* ── Financials ── */}
       {tab === "financials" && perms.viewFinancials && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
               Budget heads & expenditures
             </span>
-            {perms.addExpenditure && (
+            {perms.addExpenditure && project.budgetHeads.length > 0 && (
               <AddExpenditureForm
                 projectId={project.id}
                 budgetHeads={project.budgetHeads}
@@ -430,6 +604,7 @@ export default function ProjectTabs({
               />
             )}
           </div>
+
           {!perms.addExpenditure && (
             <div style={{
               marginBottom: 16, padding: "10px 14px",
@@ -439,10 +614,10 @@ export default function ProjectTabs({
               ℹ️ You can view financials but only the PI can add or delete expenditures.
             </div>
           )}
-          {project.budgetHeads.length === 0 ? (
-            <Empty message="No budget heads defined for this project." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Budget heads list */}
+          {project.budgetHeads.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 16 }}>
               {project.budgetHeads.map((bh) => {
                 const spent = bh.expenditures.reduce((s, e) => s + e.amount, 0);
                 const pct = bh.allocatedAmount > 0
@@ -458,10 +633,10 @@ export default function ProjectTabs({
                       padding: "14px 16px", borderBottom: "1px solid #EBEBF0",
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1A2E" }}>{bh.name}</span>
                           <span style={{
-                            marginLeft: 8, fontSize: 11, fontWeight: 600,
+                            fontSize: 11, fontWeight: 600,
                             background: bh.category === "NON_RECURRING" ? "#F3E5F5" : "#E8F5E9",
                             color: bh.category === "NON_RECURRING" ? "#7B1FA2" : "#2E7D32",
                             padding: "2px 8px", borderRadius: 4,
@@ -469,9 +644,24 @@ export default function ProjectTabs({
                             {bh.category === "NON_RECURRING" ? "Non-Recurring" : "Recurring"}
                           </span>
                         </div>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: over ? "#C62828" : "#1A1A2E" }}>
-                          {inr(spent)} / {inr(bh.allocatedAmount)}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: over ? "#C62828" : "#1A1A2E" }}>
+                            {inr(spent)} / {inr(bh.allocatedAmount)}
+                          </span>
+                          {perms.deleteBudgetHead && (
+                            <button
+                              onClick={() => deleteBudgetHead(bh.id)}
+                              disabled={deletingId === bh.id}
+                              style={{
+                                background: "#FFF0F0", border: "none", borderRadius: 6,
+                                color: "#C62828", fontSize: 11, fontWeight: 600,
+                                padding: "3px 8px", cursor: "pointer",
+                              }}
+                            >
+                              {deletingId === bh.id ? "…" : "Delete"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <ProgressBar value={pct} danger={over} />
                       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: "#9999AA" }}>
@@ -483,7 +673,7 @@ export default function ProjectTabs({
                         </span>
                       </div>
                     </div>
-                    {bh.expenditures.length > 0 && (
+                    {bh.expenditures.length > 0 ? (
                       <div style={{ padding: "0 16px" }}>
                         {bh.expenditures.map((exp, i) => (
                           <div key={exp.id} style={{
@@ -525,8 +715,7 @@ export default function ProjectTabs({
                           </div>
                         ))}
                       </div>
-                    )}
-                    {bh.expenditures.length === 0 && (
+                    ) : (
                       <p style={{ fontSize: 12, color: "#9999AA", padding: "12px 16px", margin: 0 }}>
                         No expenditures recorded yet.
                       </p>
@@ -536,20 +725,34 @@ export default function ProjectTabs({
               })}
             </div>
           )}
-          <div style={{
-            marginTop: 16, background: "linear-gradient(135deg, #5B4FE9, #7C6FF7)",
-            borderRadius: 12, padding: "16px 20px",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-            color: "#fff",
-          }}>
-            <span style={{ fontSize: 13, opacity: .85 }}>Total Spent</span>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>{inr(totalSpent)}</div>
-              <div style={{ fontSize: 11, opacity: .75 }}>
-                of {inr(project.totalBudget)} · {budgetPct}% used
+
+          {/* Add Budget Head inline form — PI only */}
+          {perms.addBudgetHead && (
+            <AddBudgetHeadInline projectId={project.id} onSuccess={refresh} />
+          )}
+
+          {/* Empty state when no budget heads and not PI */}
+          {project.budgetHeads.length === 0 && !perms.addBudgetHead && (
+            <Empty message="No budget heads defined for this project yet." />
+          )}
+
+          {/* Total footer */}
+          {project.budgetHeads.length > 0 && (
+            <div style={{
+              marginTop: 16, background: "linear-gradient(135deg, #5B4FE9, #7C6FF7)",
+              borderRadius: 12, padding: "16px 20px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              color: "#fff",
+            }}>
+              <span style={{ fontSize: 13, opacity: .85 }}>Total Spent</span>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 20, fontWeight: 800 }}>{inr(totalSpent)}</div>
+                <div style={{ fontSize: 11, opacity: .75 }}>
+                  of {inr(project.totalBudget)} · {budgetPct}% used
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

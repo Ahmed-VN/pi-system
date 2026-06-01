@@ -28,14 +28,13 @@ import {
 interface BudgetHead {
   id: string;
   name: string;
-  allocatedAmount: number; // already converted to Number by [id]/page.tsx
+  allocatedAmount: number;
   category: string;
 }
 
 interface AddExpenditureFormProps {
   projectId: string;
   budgetHeads: BudgetHead[];
-  /** Called after an expenditure is successfully recorded */
   onSuccess: () => void;
 }
 
@@ -67,7 +66,6 @@ export default function AddExpenditureForm({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Partial<FormState>>({});
 
-  // The budget head the user has selected (for showing remaining balance)
   const selectedHead = budgetHeads.find((bh) => bh.id === form.budgetHeadId);
 
   function validate(): boolean {
@@ -76,8 +74,7 @@ export default function AddExpenditureForm({
     if (!form.amount.trim()) next.amount = "Amount is required";
     else if (isNaN(Number(form.amount)) || Number(form.amount) <= 0)
       next.amount = "Enter a valid positive amount";
-    if (!form.description.trim())
-      next.description = "Description is required";
+    if (!form.description.trim()) next.description = "Description is required";
     if (!form.date) next.date = "Date is required";
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -86,7 +83,6 @@ export default function AddExpenditureForm({
   async function handleSubmit() {
     if (!validate()) return;
     setLoading(true);
-
     try {
       const res = await fetch("/api/expenditures", {
         method: "POST",
@@ -101,14 +97,11 @@ export default function AddExpenditureForm({
           vendor: form.vendor.trim() || null,
         }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
         toast.error(data.error ?? "Failed to record expenditure");
         return;
       }
-
       toast.success(
         `₹${Number(form.amount).toLocaleString("en-IN")} recorded under ${
           selectedHead?.name ?? "budget head"
@@ -153,34 +146,48 @@ export default function AddExpenditureForm({
             <Label htmlFor="exp-head">
               Budget head <span className="text-destructive">*</span>
             </Label>
-            <Select
+
+            {/* Native select as fallback — avoids shadcn Select portal/z-index issues inside Dialog */}
+            <select
+              id="exp-head"
               value={form.budgetHeadId}
-              onValueChange={(val) => {
-                setForm((f) => ({ ...f, budgetHeadId: val }));
+              onChange={(e) => {
+                setForm((f) => ({ ...f, budgetHeadId: e.target.value }));
                 setErrors((err) => ({ ...err, budgetHeadId: undefined }));
               }}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                border: errors.budgetHeadId
+                  ? "1.5px solid #EF4444"
+                  : "1.5px solid #E5E7EB",
+                borderRadius: 8,
+                fontSize: 14,
+                color: form.budgetHeadId ? "#1A1A2E" : "#9CA3AF",
+                background: "white",
+                cursor: "pointer",
+                outline: "none",
+                appearance: "auto",
+              }}
             >
-              <SelectTrigger
-                id="exp-head"
-                aria-invalid={!!errors.budgetHeadId}
-              >
-                <SelectValue placeholder="Select budget head…" />
-              </SelectTrigger>
-              <SelectContent>
-                {budgetHeads.map((bh) => (
-                  <SelectItem key={bh.id} value={bh.id}>
-                    <span>{bh.name}</span>
-                    <span className="ml-2 text-muted-foreground text-xs">
-                      — ₹{bh.allocatedAmount.toLocaleString("en-IN")} allocated
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <option value="" disabled>
+                Select budget head…
+              </option>
+              {budgetHeads.length === 0 && (
+                <option value="" disabled>
+                  No budget heads defined for this project
+                </option>
+              )}
+              {budgetHeads.map((bh) => (
+                <option key={bh.id} value={bh.id}>
+                  {bh.name} — ₹{bh.allocatedAmount.toLocaleString("en-IN")} allocated
+                </option>
+              ))}
+            </select>
+
             {errors.budgetHeadId && (
               <p className="text-xs text-destructive">{errors.budgetHeadId}</p>
             )}
-            {/* Show selected head category as a hint */}
             {selectedHead && (
               <p className="text-xs text-muted-foreground">
                 Category:{" "}
@@ -217,13 +224,10 @@ export default function AddExpenditureForm({
                   setErrors((err) => ({ ...err, amount: undefined }));
                 }}
                 aria-invalid={!!errors.amount}
-                aria-describedby={errors.amount ? "exp-amount-err" : undefined}
               />
             </div>
             {errors.amount && (
-              <p id="exp-amount-err" className="text-xs text-destructive">
-                {errors.amount}
-              </p>
+              <p className="text-xs text-destructive">{errors.amount}</p>
             )}
           </div>
 
@@ -242,14 +246,9 @@ export default function AddExpenditureForm({
                 setErrors((err) => ({ ...err, description: undefined }));
               }}
               aria-invalid={!!errors.description}
-              aria-describedby={
-                errors.description ? "exp-desc-err" : undefined
-              }
             />
             {errors.description && (
-              <p id="exp-desc-err" className="text-xs text-destructive">
-                {errors.description}
-              </p>
+              <p className="text-xs text-destructive">{errors.description}</p>
             )}
           </div>
 

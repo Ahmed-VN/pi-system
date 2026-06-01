@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     // Inject PI as a synthetic personnel entry if not already present
     const piEntry = !piAlreadyListed && project.pi
       ? [{
-          id: `pi-synthetic-${project.piId}`,
+          id: `pi-synthetic-${project.piId}-${project.id}`,
           projectId: project.id,
           userId: project.piId,
           role: 'PI',
