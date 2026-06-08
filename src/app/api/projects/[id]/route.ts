@@ -14,7 +14,13 @@ export async function GET(
   const { id } = await context.params;
 
   const project = await prisma.project.findFirst({
-    where: { id, pi: { email: session.user.email! } },
+    where: {
+      id,
+      OR: [
+        { pi: { email: session.user.email! } },
+        { personnelRecords: { some: { user: { email: session.user.email! } } } },
+      ],
+    },
     include: {
       pi: { select: { name: true, email: true } },
       milestones: { orderBy: { dueDate: "asc" } },
@@ -127,6 +133,8 @@ export async function PATCH(
     updatedAt: updated.updatedAt.toISOString(),
   });
 }
+
+// ─── DELETE /api/projects/[id] ────────────────────────────────────────────────
 
 export async function DELETE(
   req: NextRequest,

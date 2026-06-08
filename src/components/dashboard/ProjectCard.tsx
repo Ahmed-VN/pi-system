@@ -27,7 +27,13 @@ function getStatusStyle(status: string) {
   return { label: "Closed", bg: "bg-gray-100", text: "text-gray-500", dot: "bg-gray-400" };
 }
 
-export default function ProjectCard({ project }: { project: Project }) {
+export default function ProjectCard({
+  project,
+  isPI = false,
+}: {
+  project: Project;
+  isPI?: boolean;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -162,23 +168,25 @@ export default function ProjectCard({ project }: { project: Project }) {
           </div>
         </Link>
 
-        {/* Delete button — appears on hover */}
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setConfirming(true);
-          }}
-          className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-white border border-[#EBEBF0] text-[#9999AA] hover:bg-red-50 hover:border-red-200 hover:text-red-500 transition-all opacity-0 group-hover/card:opacity-100 flex items-center justify-center shadow-sm z-10"
-          title="Delete project"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6M14 11v6" />
-            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-          </svg>
-        </button>
+        {/* Delete button — PI only, appears on hover */}
+        {isPI && (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setConfirming(true);
+            }}
+            className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-white border border-[#EBEBF0] text-[#9999AA] hover:bg-red-50 hover:border-red-200 hover:text-red-500 transition-all opacity-0 group-hover/card:opacity-100 flex items-center justify-center shadow-sm z-10"
+            title="Delete project"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          </button>
+        )}
       </div>
     </>
   );

@@ -8,6 +8,7 @@ import MilestoneStatusButton from "./MilestoneStatusButton";
 import AddTeamMemberForm from "./AddTeamMemberForm";
 import AddExpenditureForm from "./AddExpenditureForm";
 import UploadDocumentForm from "./UploadDocumentForm";
+import MessagingTab from './MessagingTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,8 +52,8 @@ function can(role: string) {
     deleteExpenditure: role === "PI",
     addBudgetHead:     role === "PI",
     deleteBudgetHead:  role === "PI",
-    uploadDocument:    role === "PI" || role === "CO_PI",
-    deleteDocument:    role === "PI",
+    uploadDocument:    role === "PI" || role === "CO_PI" || role === "JRF",
+    deleteDocument:    role === "PI" || role === "CO_PI" || role === "JRF",
   };
 }
 
@@ -79,11 +80,11 @@ const ROLE_LABELS: Record<string, string> = {
 
 const AVATAR_COLORS = ["#5B4FE9","#7C6FF7","#4CAF50","#2196F3","#FF9800","#E91E63"];
 
-type Tab = "overview" | "milestones" | "team" | "financials" | "documents";
+type Tab = "overview" | "milestones" | "team" | "financials" | "documents" | "messages";
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: "Overview", milestones: "Milestones", team: "Team",
-  financials: "Financials", documents: "Documents",
+  financials: "Financials", documents: "Documents", messages: "💬 Messages",
 };
 
 // ─── Inline Add Budget Head Form ──────────────────────────────────────────────
@@ -166,7 +167,6 @@ function AddBudgetHeadInline({
         New Budget Head
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {/* Name */}
         <div>
           <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
             Head Name *
@@ -184,8 +184,6 @@ function AddBudgetHeadInline({
           />
           {errors.headName && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.headName}</p>}
         </div>
-
-        {/* Category + Amount row */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div>
             <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
@@ -228,8 +226,6 @@ function AddBudgetHeadInline({
             {errors.allocatedAmount && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.allocatedAmount}</p>}
           </div>
         </div>
-
-        {/* Buttons */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button
             onClick={() => { setOpen(false); setErrors({}); setHeadName(""); setAllocatedAmount(""); }}
@@ -281,8 +277,8 @@ export default function ProjectTabs({
     ? Math.min(100, Math.round((totalSpent / project.totalBudget) * 100)) : 0;
 
   const visibleTabs: Tab[] = perms.viewFinancials
-    ? ["overview", "milestones", "team", "financials", "documents"]
-    : ["overview", "milestones", "team", "documents"];
+    ? ["overview", "milestones", "team", "financials", "documents", "messages"]
+    : ["overview", "milestones", "team", "documents", "messages"];
 
   const counts: Partial<Record<Tab, number>> = {
     milestones: project.milestones.length,
@@ -298,6 +294,16 @@ export default function ProjectTabs({
     setDeletingId(null);
     if (res.ok) { toast.success("Milestone deleted"); refresh(); }
     else toast.error("Failed to delete milestone");
+  }
+
+  async function deleteDocument(id: string) {
+    if (!perms.deleteDocument) return;
+    if (!confirm("Delete this document? This cannot be undone.")) return;
+    setDeletingId(id);
+    const res = await fetch(`/api/documents?id=${id}`, { method: "DELETE" });
+    setDeletingId(null);
+    if (res.ok) { toast.success("Document deleted"); refresh(); }
+    else toast.error("Failed to delete document");
   }
 
   async function deleteExpenditure(id: string) {
@@ -615,7 +621,6 @@ export default function ProjectTabs({
             </div>
           )}
 
-          {/* Budget heads list */}
           {project.budgetHeads.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 16 }}>
               {project.budgetHeads.map((bh) => {
@@ -726,17 +731,14 @@ export default function ProjectTabs({
             </div>
           )}
 
-          {/* Add Budget Head inline form — PI only */}
           {perms.addBudgetHead && (
             <AddBudgetHeadInline projectId={project.id} onSuccess={refresh} />
           )}
 
-          {/* Empty state when no budget heads and not PI */}
           {project.budgetHeads.length === 0 && !perms.addBudgetHead && (
             <Empty message="No budget heads defined for this project yet." />
           )}
 
-          {/* Total footer */}
           {project.budgetHeads.length > 0 && (
             <div style={{
               marginTop: 16, background: "linear-gradient(135deg, #5B4FE9, #7C6FF7)",
@@ -767,15 +769,6 @@ export default function ProjectTabs({
               <UploadDocumentForm projectId={project.id} onSuccess={refresh} />
             )}
           </div>
-          {userRole === "JRF" && (
-            <div style={{
-              marginBottom: 16, padding: "10px 14px",
-              background: "#FFF8E1", borderRadius: 10,
-              fontSize: 12, color: "#F57F17",
-            }}>
-              ℹ️ You can view documents. Only PI and Co-PI can upload documents.
-            </div>
-          )}
           {project.documents.length === 0 ? (
             <Empty message="No documents uploaded yet." />
           ) : (
@@ -810,11 +803,29 @@ export default function ProjectTabs({
                   >
                     View →
                   </a>
+                  {perms.deleteDocument && (
+                    <button
+                      onClick={() => deleteDocument(doc.id)}
+                      disabled={deletingId === doc.id}
+                      style={{
+                        background: "#FFF0F0", border: "none", borderRadius: 7,
+                        color: "#C62828", fontSize: 12, fontWeight: 600,
+                        padding: "5px 10px", cursor: "pointer", flexShrink: 0,
+                      }}
+                    >
+                      {deletingId === doc.id ? "…" : "Delete"}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Messages ── */}
+      {tab === "messages" && (
+        <MessagingTab projectId={project.id} />
       )}
     </div>
   );

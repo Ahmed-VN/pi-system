@@ -8,6 +8,7 @@ const navItems = [
   { href: '/dashboard/projects', label: 'Projects', icon: '📁' },
   { href: '/dashboard/team', label: 'Team', icon: '👥' },
   { href: '/dashboard/documents', label: 'Documents', icon: '📄' },
+  { href: '/dashboard/templates', label: 'ANRF Templates', icon: '📋' },
 ]
 
 export default function Sidebar() {
@@ -27,7 +28,7 @@ export default function Sidebar() {
             href={item.href}
             className={cn(
               'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-              pathname === item.href
+              pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
                 ? 'bg-blue-50 text-blue-700'
                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
             )}

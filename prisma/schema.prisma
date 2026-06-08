@@ -49,24 +49,26 @@ enum BudgetCategory {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  password     String
-  role         Role     @default(PI)
-  employeeId   String?  @unique
-  institution  String?
-  designation  String?
-  phone        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  password    String
+  role        Role     @default(PI)
+  employeeId  String?  @unique
+  institution String?
+  designation String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   projectsAsPi      Project[]         @relation("ProjectPI")
   personnelRecords  PersonnelRecord[]
   uploadedDocuments Document[]
   createdMilestones Milestone[]
   notifications     Notification[]
-
+  messages          Message[]         @relation("UserMessages")
+  anrfTemplates  AnrfTemplate[]
+  
   @@map("users")
 }
 
@@ -92,6 +94,7 @@ model Project {
   budgetHeads      BudgetHead[]
   personnelRecords PersonnelRecord[]
   expenditures     Expenditure[]
+  threads          Thread[]
 
   @@index([piId])
   @@index([status])
@@ -202,4 +205,51 @@ model Notification {
 
   @@index([userId])
   @@map("notifications")
+}
+
+enum MessageType {
+  CHAT
+  DAILY_REPORT
+  FEEDBACK
+}
+
+model Thread {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String?
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  threadId    String
+  thread      Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User        @relation("UserMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  content     String
+  messageType MessageType @default(CHAT)
+  parentId    String?
+  parent      Message?    @relation("MessageReplies", fields: [parentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  replies     Message[]   @relation("MessageReplies")
+  isRead      Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+}
+
+model AnrfTemplate {
+  id           Int      @id @default(autoincrement())
+  name         String
+  originalName String
+  category     String   @default("Other")
+  fileType     String   @default("other")
+  fileSize     String
+  filePath     String
+  createdAt    DateTime @default(now())
+ 
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+ 
+  @@map("anrf_templates")
 }

@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
             personnelRecords: {
               some: {
                 userId: session.user.id,
-                role: "CO_PI",
+                role: { in: ["CO_PI", "JRF"] },
               },
             },
           },
@@ -109,4 +109,19 @@ export async function POST(req: NextRequest) {
     console.error("Documents POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+export async function DELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  const doc = await prisma.document.findUnique({ where: { id } });
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  await prisma.document.delete({ where: { id } });
+  return NextResponse.json({ success: true });
 }
