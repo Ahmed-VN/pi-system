@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
+import { Paperclip, X, FileText, Image, File, Download } from 'lucide-react'
 
 type MessageType = 'CHAT' | 'DAILY_REPORT' | 'FEEDBACK'
 
@@ -12,6 +13,14 @@ interface Sender {
   id: string
   name: string
   role: string
+}
+
+interface Attachment {
+  id: string
+  fileName: string
+  fileUrl: string
+  fileSize?: number
+  mimeType?: string
 }
 
 interface Message {
@@ -22,6 +31,7 @@ interface Message {
   createdAt: string
   parentId?: string
   replies?: Message[]
+  attachments: Attachment[]
 }
 
 interface Thread {
@@ -31,9 +41,47 @@ interface Thread {
   updatedAt: string
 }
 
+interface PendingFile {
+  file: File
+  preview?: string
+}
+
 type SidebarView = 'chat' | 'daily_reports'
 
 const DAILY_REPORT_ROLES = ['PI', 'JRF']
+
+function formatBytes(bytes?: number) {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function AttachmentIcon({ mimeType }: { mimeType?: string }) {
+  if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4" />
+  if (mimeType === 'application/pdf') return <FileText className="w-4 h-4" />
+  return <File className="w-4 h-4" />
+}
+
+function AttachmentChip({ attachment }: { attachment: Attachment }) {
+  const isImage = attachment.mimeType?.startsWith('image/')
+  return (
+    <a
+      href={attachment.fileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 transition text-xs border border-white/30 group"
+      download={!isImage}
+    >
+      <AttachmentIcon mimeType={attachment.mimeType} />
+      <span className="truncate max-w-[120px]">{attachment.fileName}</span>
+      {attachment.fileSize && (
+        <span className="opacity-60 shrink-0">{formatBytes(attachment.fileSize)}</span>
+      )}
+      <Download className="w-3 h-3 opacity-0 group-hover:opacity-100 transition shrink-0" />
+    </a>
+  )
+}
 
 export default function MessagingTab({ projectId }: { projectId: string }) {
   const { data: session } = useSession()
@@ -43,28 +91,33 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
   const [content, setContent] = useState('')
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [loading, setLoading] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isFirstLoad = useRef(true)
 
   const userRole = (session?.user as { role?: string })?.role ?? ''
   const canSeeDailyReports = DAILY_REPORT_ROLES.includes(userRole)
 
-  // Only the single General Chat thread (API guarantees at most one per project)
   const chatThreads = threads.filter(t => t.title === 'General Chat')
 
-  // All messages across all threads that are DAILY_REPORT or FEEDBACK on a report
-  const reportMessages = threads.flatMap(t =>
-    t.messages.filter(m => m.messageType === 'DAILY_REPORT' || m.messageType === 'FEEDBACK')
-  ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  const reportMessages = threads
+    .flatMap(t =>
+      t.messages.filter(m => m.messageType === 'DAILY_REPORT' || m.messageType === 'FEEDBACK')
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-  // For JRF: only their own reports + feedback on them
-  const visibleReports = userRole === 'PI'
-    ? reportMessages
-    : reportMessages.filter(m =>
-        m.sender.id === session?.user?.id ||
-        (m.messageType === 'FEEDBACK' && m.parentId &&
-          reportMessages.find(r => r.id === m.parentId)?.sender.id === session?.user?.id)
-      )
+  const visibleReports =
+    userRole === 'PI'
+      ? reportMessages
+      : reportMessages.filter(
+          m =>
+            m.sender.id === session?.user?.id ||
+            (m.messageType === 'FEEDBACK' &&
+              m.parentId &&
+              reportMessages.find(r => r.id === m.parentId)?.sender.id === session?.user?.id)
+        )
 
   useEffect(() => {
     const load = async () => {
@@ -90,11 +143,56 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
     return data
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (pendingFiles.length + files.length > 5) {
+      toast.error('Maximum 5 files per message')
+      return
+    }
+    const newPending: PendingFile[] = files.map(file => ({
+      file,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+    }))
+    setPendingFiles(prev => [...prev, ...newPending])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeFile = (index: number) => {
+    setPendingFiles(prev => {
+      const updated = [...prev]
+      if (updated[index].preview) URL.revokeObjectURL(updated[index].preview!)
+      updated.splice(index, 1)
+      return updated
+    })
+  }
+
+  const uploadFiles = async (): Promise<Attachment[]> => {
+    const uploaded: Attachment[] = []
+    for (const { file } of pendingFiles) {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Upload failed')
+      uploaded.push({ id: '', ...data })
+    }
+    return uploaded
+  }
+
   const sendMessage = async (overrideType?: MessageType) => {
-    if (!content.trim()) return
-    const msgType: MessageType = overrideType ?? (sidebarView === 'daily_reports' ? 'DAILY_REPORT' : 'CHAT')
+    if (!content.trim() && pendingFiles.length === 0) return
+    const msgType: MessageType =
+      overrideType ?? (sidebarView === 'daily_reports' ? 'DAILY_REPORT' : 'CHAT')
     setLoading(true)
     try {
+      let attachments: Attachment[] = []
+      if (pendingFiles.length > 0) {
+        setUploading(true)
+        attachments = await uploadFiles()
+        setUploading(false)
+        setPendingFiles([])
+      }
+
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,6 +202,7 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
           messageType: msgType,
           threadId: activeThread?.id,
           parentId: replyTo?.id,
+          attachments,
         }),
       })
       const data = await res.json()
@@ -118,6 +217,7 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
       }
       toast.success(msgType === 'DAILY_REPORT' ? 'Daily report submitted!' : 'Message sent!')
     } catch (e: unknown) {
+      setUploading(false)
       toast.error(e instanceof Error ? e.message : 'Something went wrong')
     } finally {
       setLoading(false)
@@ -131,9 +231,10 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
     ADMIN: 'bg-gray-100 text-gray-700',
   }
 
-  const pendingReportCount = visibleReports.filter(m =>
-    m.messageType === 'DAILY_REPORT' &&
-    !reportMessages.find(r => r.messageType === 'FEEDBACK' && r.parentId === m.id)
+  const pendingReportCount = visibleReports.filter(
+    m =>
+      m.messageType === 'DAILY_REPORT' &&
+      !reportMessages.find(r => r.messageType === 'FEEDBACK' && r.parentId === m.id)
   ).length
 
   return (
@@ -141,8 +242,6 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
       {/* ── Sidebar ── */}
       <div className="w-56 border-r bg-gray-50 flex flex-col">
         <div className="p-3 border-b font-semibold text-sm text-gray-700">Messages</div>
-
-        {/* Chat conversations */}
         <div className="px-3 pt-3 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
           Conversations
         </div>
@@ -153,7 +252,10 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
           {chatThreads.map(t => (
             <button
               key={t.id}
-              onClick={() => { setActiveThread(t); setSidebarView('chat') }}
+              onClick={() => {
+                setActiveThread(t)
+                setSidebarView('chat')
+              }}
               className={`w-full text-left px-3 py-2 text-sm border-b hover:bg-gray-100 transition ${
                 sidebarView === 'chat' && activeThread?.id === t.id
                   ? 'bg-violet-50 border-l-2 border-l-violet-500 text-violet-700 font-medium'
@@ -167,7 +269,6 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
             </button>
           ))}
 
-          {/* Daily Reports — immediately below chat threads, PI & JRF only */}
           {canSeeDailyReports && (
             <button
               onClick={() => setSidebarView('daily_reports')}
@@ -212,13 +313,21 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                   const isMe = msg.sender.id === session?.user?.id
                   return (
                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[70%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                      <div
+                        className={`max-w-[70%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}
+                      >
                         <div className="flex items-center gap-2 text-xs text-gray-500">
-                          {!isMe && <span className="font-medium text-gray-700">{msg.sender.name}</span>}
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${roleColor[msg.sender.role]}`}>
+                          {!isMe && (
+                            <span className="font-medium text-gray-700">{msg.sender.name}</span>
+                          )}
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${roleColor[msg.sender.role]}`}
+                          >
                             {msg.sender.role.replace('_', '-')}
                           </span>
                         </div>
+
+                        {/* Message bubble */}
                         <div
                           className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
                             isMe
@@ -226,11 +335,42 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                               : 'bg-gray-100 text-gray-800 rounded-bl-none'
                           }`}
                         >
-                          {msg.content}
+                          {msg.content && <p>{msg.content}</p>}
+
+                          {/* Attachments */}
+                          {msg.attachments?.length > 0 && (
+                            <div className={`flex flex-wrap gap-1.5 ${msg.content ? 'mt-2' : ''}`}>
+                              {msg.attachments.map((att: Attachment) => {
+                                const isImage = att.mimeType?.startsWith('image/')
+                                if (isImage) {
+                                  return (
+                                    <a
+                                      key={att.id}
+                                      href={att.fileUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={att.fileUrl}
+                                        alt={att.fileName}
+                                        className="rounded-lg max-w-[200px] max-h-[160px] object-cover border border-white/30 hover:opacity-90 transition"
+                                      />
+                                    </a>
+                                  )
+                                }
+                                return <AttachmentChip key={att.id} attachment={att} />
+                              })}
+                            </div>
+                          )}
                         </div>
+
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-gray-400">
-                            {new Date(msg.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(msg.createdAt).toLocaleTimeString('en-IN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
                           </span>
                           <button
                             className="text-[10px] text-violet-500 hover:underline"
@@ -246,34 +386,93 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
               <div ref={bottomRef} />
             </div>
 
+            {/* ── Chat input ── */}
             <div className="border-t p-3 space-y-2 bg-gray-50">
               {replyTo && (
                 <div className="flex items-center gap-2 text-xs bg-violet-50 px-2 py-1 rounded">
                   <span className="text-violet-600">Replying to {replyTo.sender.name}:</span>
                   <span className="text-gray-500 truncate">{replyTo.content.slice(0, 60)}</span>
-                  <button onClick={() => setReplyTo(null)} className="ml-auto text-gray-400 hover:text-gray-600">✕</button>
+                  <button
+                    onClick={() => setReplyTo(null)}
+                    className="ml-auto text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
-              <div className="flex gap-2">
+
+              {/* Pending file previews */}
+              {pendingFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-1">
+                  {pendingFiles.map((pf, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-1.5 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1 text-xs text-violet-700"
+                    >
+                      {pf.preview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={pf.preview} alt="" className="w-8 h-8 rounded object-cover" />
+                      ) : (
+                        <AttachmentIcon mimeType={pf.file.type} />
+                      )}
+                      <span className="truncate max-w-[100px]">{pf.file.name}</span>
+                      <span className="text-violet-400">{formatBytes(pf.file.size)}</span>
+                      <button
+                        onClick={() => removeFile(i)}
+                        className="text-violet-400 hover:text-violet-600 ml-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2 items-end">
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp"
+                  onChange={handleFileChange}
+                />
+                {/* Paperclip button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || pendingFiles.length >= 5}
+                  className="p-2 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition disabled:opacity-40"
+                  title="Attach file (PDF, Word, Excel, Image)"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
+
                 <Textarea
                   value={content}
                   onChange={e => setContent(e.target.value)}
                   placeholder="Type a message..."
                   rows={2}
-                  className="text-sm resize-none"
+                  className="text-sm resize-none flex-1"
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage('CHAT') }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      sendMessage('CHAT')
+                    }
                   }}
                 />
                 <Button
                   onClick={() => sendMessage('CHAT')}
-                  disabled={loading || !content.trim()}
+                  disabled={loading || (!content.trim() && pendingFiles.length === 0)}
                   className="bg-violet-600 hover:bg-violet-700 text-white px-4"
                 >
-                  {loading ? '...' : 'Send'}
+                  {uploading ? '⬆️' : loading ? '...' : 'Send'}
                 </Button>
               </div>
-              <p className="text-[10px] text-gray-400">Enter to send · Shift+Enter for new line</p>
+              <p className="text-[10px] text-gray-400">
+                Enter to send · Shift+Enter for new line · 📎 up to 5 files · max 10 MB each
+              </p>
             </div>
           </>
         )}
@@ -291,7 +490,9 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {visibleReports.filter(m => m.messageType === 'DAILY_REPORT').length === 0 && (
                 <div className="text-center text-sm text-gray-400 mt-16">
-                  {userRole === 'JRF' ? 'No reports submitted yet. Submit your first daily report below.' : 'No daily reports submitted yet.'}
+                  {userRole === 'JRF'
+                    ? 'No reports submitted yet. Submit your first daily report below.'
+                    : 'No daily reports submitted yet.'}
                 </div>
               )}
 
@@ -303,17 +504,15 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                   )
                   const isMyReport = report.sender.id === session?.user?.id
                   return (
-                    <div
-                      key={report.id}
-                      className="border rounded-xl bg-white overflow-hidden"
-                    >
-                      {/* Report header */}
+                    <div key={report.id} className="border rounded-xl bg-white overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-gray-700">
                             {isMyReport ? 'You' : report.sender.name}
                           </span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${roleColor[report.sender.role]}`}>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${roleColor[report.sender.role]}`}
+                          >
                             {report.sender.role.replace('_', '-')}
                           </span>
                           {feedback ? (
@@ -327,35 +526,44 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                           )}
                         </div>
                         <span className="text-[10px] text-gray-400">
-                          {new Date(report.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {new Date(report.createdAt).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
                           {' · '}
-                          {new Date(report.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(report.createdAt).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
                       </div>
-
-                      {/* Report body */}
                       <div className="px-4 py-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
                         {report.content}
                       </div>
-
-                      {/* Feedback block */}
                       {feedback && (
                         <div className="mx-4 mb-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5">
                           <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-[10px] font-semibold text-amber-700">PI Feedback</span>
+                            <span className="text-[10px] font-semibold text-amber-700">
+                              PI Feedback
+                            </span>
                             <span className="text-[10px] text-gray-400">
-                              · {new Date(feedback.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                              ·{' '}
+                              {new Date(feedback.createdAt).toLocaleTimeString('en-IN', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
                             </span>
                           </div>
                           <p className="text-xs text-amber-900 leading-relaxed">{feedback.content}</p>
                         </div>
                       )}
-
-                      {/* PI: give feedback inline if not yet given */}
                       {userRole === 'PI' && !feedback && (
                         <FeedbackInline
                           reportId={report.id}
-                          threadId={threads.find(t => t.messages.some(m => m.id === report.id))?.id ?? ''}
+                          threadId={
+                            threads.find(t => t.messages.some(m => m.id === report.id))?.id ?? ''
+                          }
                           projectId={projectId}
                           onSent={fetchThreads}
                         />
@@ -366,11 +574,12 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
               <div ref={bottomRef} />
             </div>
 
-            {/* JRF: submit report */}
             {userRole === 'JRF' && (
               <div className="border-t p-3 space-y-2 bg-gray-50">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium text-gray-600">📋 Submit today&apos;s report</span>
+                  <span className="text-xs font-medium text-gray-600">
+                    📋 Submit today&apos;s report
+                  </span>
                   <span className="text-[10px] text-gray-400">· Visible to PI only</span>
                 </div>
                 <div className="flex gap-2">
@@ -381,7 +590,10 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                     rows={3}
                     className="text-sm resize-none"
                     onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage('DAILY_REPORT') }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        sendMessage('DAILY_REPORT')
+                      }
                     }}
                   />
                   <Button
@@ -449,10 +661,7 @@ function FeedbackInline({
   return (
     <div className="px-4 pb-3">
       {!open ? (
-        <button
-          onClick={() => setOpen(true)}
-          className="text-xs text-violet-600 hover:underline"
-        >
+        <button onClick={() => setOpen(true)} className="text-xs text-violet-600 hover:underline">
           ✏️ Give feedback
         </button>
       ) : (
@@ -478,7 +687,10 @@ function FeedbackInline({
               size="sm"
               variant="ghost"
               className="text-xs"
-              onClick={() => { setOpen(false); setText('') }}
+              onClick={() => {
+                setOpen(false)
+                setText('')
+              }}
             >
               Cancel
             </Button>

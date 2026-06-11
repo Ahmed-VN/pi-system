@@ -7,6 +7,7 @@ import AddMilestoneForm from "./AddMilestoneForm";
 import MilestoneStatusButton from "./MilestoneStatusButton";
 import AddTeamMemberForm from "./AddTeamMemberForm";
 import AddExpenditureForm from "./AddExpenditureForm";
+import FinanceToolbar from "./FinanceToolbar";
 import UploadDocumentForm from "./UploadDocumentForm";
 import MessagingTab from './MessagingTab';
 
@@ -598,16 +599,22 @@ export default function ProjectTabs({
       {/* ── Financials ── */}
       {tab === "financials" && perms.viewFinancials && (
         <div>
+          {/* ── UPDATED HEADER: FinanceToolbar + AddExpenditureForm side by side ── */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
               Budget heads & expenditures
             </span>
-            {perms.addExpenditure && project.budgetHeads.length > 0 && (
-              <AddExpenditureForm
-                projectId={project.id}
-                budgetHeads={project.budgetHeads}
-                onSuccess={refresh}
-              />
+            {perms.addExpenditure && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <FinanceToolbar projectId={project.id} onImportSuccess={refresh} />
+                {project.budgetHeads.length > 0 && (
+                  <AddExpenditureForm
+                    projectId={project.id}
+                    budgetHeads={project.budgetHeads}
+                    onSuccess={refresh}
+                  />
+                )}
+              </div>
             )}
           </div>
 
