@@ -74,7 +74,7 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
       download={!isImage}
     >
       <AttachmentIcon mimeType={attachment.mimeType} />
-      <span className="truncate max-w-[120px]">{attachment.fileName}</span>
+      <span className="truncate max-w-30">{attachment.fileName}</span>
       {attachment.fileSize && (
         <span className="opacity-60 shrink-0">{formatBytes(attachment.fileSize)}</span>
       )}
@@ -354,7 +354,7 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                                       <img
                                         src={att.fileUrl}
                                         alt={att.fileName}
-                                        className="rounded-lg max-w-[200px] max-h-[160px] object-cover border border-white/30 hover:opacity-90 transition"
+                                        className="rounded-lg max-w-50 max-h-40 object-cover border border-white/30 hover:opacity-90 transition"
                                       />
                                     </a>
                                   )
@@ -415,7 +415,7 @@ export default function MessagingTab({ projectId }: { projectId: string }) {
                       ) : (
                         <AttachmentIcon mimeType={pf.file.type} />
                       )}
-                      <span className="truncate max-w-[100px]">{pf.file.name}</span>
+                      <span className="truncate max-w-25">{pf.file.name}</span>
                       <span className="text-violet-400">{formatBytes(pf.file.size)}</span>
                       <button
                         onClick={() => removeFile(i)}

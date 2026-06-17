@@ -203,7 +203,7 @@ export default async function DashboardPage() {
             },
           ].map((s) => (
             <div key={s.label} className="bg-white border border-[#EBEBF0] rounded-xl p-4 relative overflow-hidden">
-              <div className="absolute right-0 top-3 bottom-3 w-[3px] rounded-l-full" style={{ background: s.accent }} />
+              <div className="absolute right-0 top-3 bottom-3 w-0.75 rounded-l-full" style={{ background: s.accent }} />
               <div className="flex items-center gap-1.5 text-[11px] text-[#9999AA] font-medium mb-2">
                 <span style={{ color: s.accent }}>{s.icon}</span>
                 {s.label}

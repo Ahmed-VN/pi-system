@@ -99,12 +99,13 @@ export default async function ProjectDetailPage({
       user: { id: r.user.id, name: r.user.name, email: r.user.email },
     })),
     documents: raw.documents.map((d) => ({
-      id: d.id,
-      name: d.title,
-      type: d.documentType as string,
-      url: d.fileUrl,
-      uploadedAt: d.createdAt.toISOString(),
-    })),
+  id: d.id,
+  name: d.title,
+  type: d.documentType as string,
+  url: d.fileUrl,
+  uploadedAt: d.createdAt.toISOString(),
+  expiryDate: d.expiryDate ? d.expiryDate.toISOString() : null,  // add this line
+})),
   };
 
   function statusBadgeStyle(status: string) {
@@ -129,7 +130,7 @@ export default async function ProjectDetailPage({
           Projects
         </Link>
         <span className="text-[#EBEBF0] text-sm">/</span>
-        <span className="text-[13px] font-medium text-[#1A1A2E] truncate max-w-[400px]">
+        <span className="text-[13px] font-medium text-[#1A1A2E] truncate max-w-100">
           {project.title}
         </span>
         {/* Role badge */}
@@ -155,7 +156,7 @@ export default async function ProjectDetailPage({
               </p>
             </div>
             <div
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-semibold flex-shrink-0"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-semibold shrink-0"
               style={{ background: badge.bg, color: badge.text }}
             >
               <span className="w-2 h-2 rounded-full" style={{ background: badge.dot }} />
