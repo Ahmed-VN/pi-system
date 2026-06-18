@@ -7,6 +7,7 @@ import AddMilestoneForm from "./AddMilestoneForm";
 import MilestoneStatusButton from "./MilestoneStatusButton";
 import AddTeamMemberForm from "./AddTeamMemberForm";
 import AddExpenditureForm from "./AddExpenditureForm";
+import FinanceToolbar from "./FinanceToolbar";
 import UploadDocumentForm from "./UploadDocumentForm";
 import MessagingTab from './MessagingTab';
 
@@ -29,7 +30,8 @@ interface PersonnelRecord {
   id: string; role: string; stipend: number | null; joinDate: string | null; user: User;
 }
 interface Document {
-  id: string; name: string; type: string; url: string; uploadedAt: string;
+  id: string; name: string; type: string; url: string;
+  uploadedAt: string; expiryDate?: string | null;  
 }
 interface Project {
   id: string; title: string; sanctionNumber: string; grantType: string;
@@ -598,16 +600,22 @@ export default function ProjectTabs({
       {/* ── Financials ── */}
       {tab === "financials" && perms.viewFinancials && (
         <div>
+          {/* ── UPDATED HEADER: FinanceToolbar + AddExpenditureForm side by side ── */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
               Budget heads & expenditures
             </span>
-            {perms.addExpenditure && project.budgetHeads.length > 0 && (
-              <AddExpenditureForm
-                projectId={project.id}
-                budgetHeads={project.budgetHeads}
-                onSuccess={refresh}
-              />
+            {perms.addExpenditure && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <FinanceToolbar projectId={project.id} onImportSuccess={refresh} />
+                {project.budgetHeads.length > 0 && (
+                  <AddExpenditureForm
+                    projectId={project.id}
+                    budgetHeads={project.budgetHeads}
+                    onSuccess={refresh}
+                  />
+                )}
+              </div>
             )}
           </div>
 
@@ -769,55 +777,85 @@ export default function ProjectTabs({
               <UploadDocumentForm projectId={project.id} onSuccess={refresh} />
             )}
           </div>
+
           {project.documents.length === 0 ? (
             <Empty message="No documents uploaded yet." />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {project.documents.map((doc) => (
-                <div key={doc.id} style={{
-                  background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12,
-                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
-                }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 8, background: "#EEF2FF",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 18, flexShrink: 0,
-                  }}>📋</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {doc.name}
+              {project.documents.map((doc) => {
+                let expiryBadge: React.ReactNode = null;
+
+                if (doc.expiryDate) {
+                  const expiryTime = new Date(doc.expiryDate).getTime();
+                  // eslint-disable-next-line react-hooks/purity -- display-only "days left" calc; staleness across renders is acceptable here
+                  const now = Date.now();
+                  const daysLeft = Math.ceil((expiryTime - now) / (1000 * 60 * 60 * 24));
+                  const expired = daysLeft < 0;
+                  const urgent = !expired && daysLeft <= 30;
+
+                  expiryBadge = (
+                    <span style={{
+                      marginLeft: 8, fontSize: 10, fontWeight: 700,
+                      padding: "2px 7px", borderRadius: 4,
+                      background: expired ? "#FFEBEE" : urgent ? "#FFF8E1" : "#E8F5E9",
+                      color:      expired ? "#C62828" : urgent ? "#F57F17" : "#2E7D32",
+                    }}>
+                      {expired
+                        ? `Expired ${Math.abs(daysLeft)}d ago`
+                        : daysLeft === 0
+                        ? "Expires today"
+                        : `Expires in ${daysLeft}d`}
+                    </span>
+                  );
+                }
+
+                return (
+                  <div key={doc.id} style={{
+                    background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12,
+                    padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
+                  }}>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: 8, background: "#EEF2FF",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 18, flexShrink: 0,
+                    }}>📋</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {doc.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>
+                        {doc.type} · {fmt(doc.uploadedAt)}
+                        {expiryBadge}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>
-                      {doc.type} · {fmt(doc.uploadedAt)}
-                    </div>
-                  </div>
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      background: "#EEF2FF", color: "#5B4FE9", fontSize: 12,
-                      fontWeight: 600, padding: "5px 12px", borderRadius: 7,
-                      textDecoration: "none", flexShrink: 0,
-                    }}
-                  >
-                    View →
-                  </a>
-                  {perms.deleteDocument && (
-                    <button
-                      onClick={() => deleteDocument(doc.id)}
-                      disabled={deletingId === doc.id}
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       style={{
-                        background: "#FFF0F0", border: "none", borderRadius: 7,
-                        color: "#C62828", fontSize: 12, fontWeight: 600,
-                        padding: "5px 10px", cursor: "pointer", flexShrink: 0,
+                        background: "#EEF2FF", color: "#5B4FE9", fontSize: 12,
+                        fontWeight: 600, padding: "5px 12px", borderRadius: 7,
+                        textDecoration: "none", flexShrink: 0,
                       }}
                     >
-                      {deletingId === doc.id ? "…" : "Delete"}
-                    </button>
-                  )}
-                </div>
-              ))}
+                      View →
+                    </a>
+                    {perms.deleteDocument && (
+                      <button
+                        onClick={() => deleteDocument(doc.id)}
+                        disabled={deletingId === doc.id}
+                        style={{
+                          background: "#FFF0F0", border: "none", borderRadius: 7,
+                          color: "#C62828", fontSize: 12, fontWeight: 600,
+                          padding: "5px 10px", cursor: "pointer", flexShrink: 0,
+                        }}
+                      >
+                        {deletingId === doc.id ? "…" : "Delete"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

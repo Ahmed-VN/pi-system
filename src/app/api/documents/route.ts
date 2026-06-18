@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
     const title = formData.get("title") as string;
     const documentType = formData.get("documentType") as string;
     const projectId = formData.get("projectId") as string;
+    const expiryDateRaw = formData.get("expiryDate") as string | null;
 
     if (!file || !title || !documentType || !projectId) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -83,16 +84,17 @@ export async function POST(req: NextRequest) {
     const fileUrl = `/uploads/${session.user.id}/${fileName}`;
 
     const document = await prisma.document.create({
-      data: {
-        title,
-        documentType: documentType as any,
-        fileUrl,
-        fileSize: file.size,
-        mimeType: file.type,
-        projectId,
-        uploadedById: session.user.id,
-      },
-    });
+  data: {
+    title,
+    documentType: documentType as any,
+    fileUrl,
+    fileSize: file.size,
+    mimeType: file.type,
+    projectId,
+    uploadedById: session.user.id,
+    expiryDate: expiryDateRaw ? new Date(expiryDateRaw) : null,
+  },
+});
 
     await prisma.notification.create({
       data: {

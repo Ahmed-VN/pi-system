@@ -23,13 +23,18 @@ export default function UploadDocumentForm({ projectId, onSuccess }: UploadDocum
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [docType, setDocType] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // today's date in YYYY-MM-DD for min attribute
+  const todayStr = new Date().toISOString().split("T")[0];
 
   function reset() {
     setFile(null);
     setTitle("");
     setDocType("");
+    setExpiryDate("");
   }
 
   function handleFile(f: File) {
@@ -49,6 +54,7 @@ export default function UploadDocumentForm({ projectId, onSuccess }: UploadDocum
       fd.append("title", title.trim());
       fd.append("documentType", docType);
       fd.append("projectId", projectId);
+      if (expiryDate) fd.append("expiryDate", expiryDate);
 
       const res = await fetch("/api/documents", { method: "POST", body: fd });
       const data = await res.json();
@@ -199,6 +205,61 @@ export default function UploadDocumentForm({ projectId, onSuccess }: UploadDocum
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+          </div>
+
+          {/* Expiry Date — optional */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#1A1A2E", display: "block", marginBottom: 6 }}>
+              Expiry Date
+              <span style={{
+                marginLeft: 6, fontSize: 10, fontWeight: 600,
+                background: "#F3F4F6", color: "#9999AA",
+                padding: "2px 6px", borderRadius: 4,
+              }}>
+                Optional
+              </span>
+            </label>
+            <div style={{ position: "relative" }}>
+              <span style={{
+                position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)",
+                fontSize: 15, pointerEvents: "none",
+              }}>📅</span>
+              <input
+                type="date"
+                value={expiryDate}
+                min={todayStr}
+                onChange={(e) => setExpiryDate(e.target.value)}
+                style={{
+                  width: "100%", padding: "10px 12px 10px 34px", fontSize: 13,
+                  border: `1px solid ${expiryDate ? "#5B4FE9" : "#EBEBF0"}`,
+                  borderRadius: 8, outline: "none",
+                  color: expiryDate ? "#1A1A2E" : "#9999AA",
+                  background: expiryDate ? "#F5F3FF" : "#FAFAFE",
+                  boxSizing: "border-box", cursor: "pointer",
+                  transition: "all .15s",
+                }}
+              />
+            </div>
+            {expiryDate && (
+              <div style={{
+                marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <span style={{ fontSize: 11, color: "#5B4FE9", fontWeight: 600 }}>
+                  Expires: {new Date(expiryDate + "T00:00:00").toLocaleDateString("en-IN", {
+                    day: "numeric", month: "short", year: "numeric",
+                  })}
+                </span>
+                <button
+                  onClick={() => setExpiryDate("")}
+                  style={{
+                    background: "none", border: "none", fontSize: 11,
+                    color: "#9999AA", cursor: "pointer", textDecoration: "underline",
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

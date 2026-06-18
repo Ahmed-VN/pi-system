@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 
-// GET /api/messages?projectId=xxx
 export async function GET(req: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -14,7 +13,10 @@ export async function GET(req: NextRequest) {
     where: { projectId },
     include: {
       messages: {
-        include: { sender: { select: { id: true, name: true, role: true } } },
+        include: {
+          sender: { select: { id: true, name: true, role: true } },
+          attachments: true,
+        },
         orderBy: { createdAt: 'asc' },
       },
     },
@@ -24,42 +26,26 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(threads)
 }
 
-// POST /api/messages
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { projectId, content, messageType = 'CHAT', threadId, parentId } = await req.json()
+  const { projectId, content, messageType = 'CHAT', threadId, parentId, attachments } = await req.json()
 
-  if (!projectId || !content) {
-    return NextResponse.json({ error: 'projectId and content required' }, { status: 400 })
+  if (!projectId || (!content && (!attachments || attachments.length === 0))) {
+    return NextResponse.json({ error: 'projectId and content or attachment required' }, { status: 400 })
   }
 
   let thread
 
   if (threadId) {
-    // Use the explicitly provided thread
     thread = await prisma.thread.findUnique({ where: { id: threadId } })
   } else if (messageType === 'DAILY_REPORT' || messageType === 'FEEDBACK') {
-    // Daily reports and feedback always go into a single shared "Daily Reports" thread per project
-    thread = await prisma.thread.findFirst({
-      where: { projectId, title: 'Daily Reports' },
-    })
-    if (!thread) {
-      thread = await prisma.thread.create({
-        data: { projectId, title: 'Daily Reports' },
-      })
-    }
+    thread = await prisma.thread.findFirst({ where: { projectId, title: 'Daily Reports' } })
+    if (!thread) thread = await prisma.thread.create({ data: { projectId, title: 'Daily Reports' } })
   } else {
-    // CHAT: find the single existing General Chat thread, or create it once
-    thread = await prisma.thread.findFirst({
-      where: { projectId, title: 'General Chat' },
-    })
-    if (!thread) {
-      thread = await prisma.thread.create({
-        data: { projectId, title: 'General Chat' },
-      })
-    }
+    thread = await prisma.thread.findFirst({ where: { projectId, title: 'General Chat' } })
+    if (!thread) thread = await prisma.thread.create({ data: { projectId, title: 'General Chat' } })
   }
 
   if (!thread) return NextResponse.json({ error: 'Thread not found' }, { status: 404 })
@@ -68,19 +54,27 @@ export async function POST(req: NextRequest) {
     data: {
       threadId: thread.id,
       senderId: session.user.id,
-      content,
+      content: content || '',
       messageType,
       parentId: parentId || null,
+      attachments: attachments?.length
+        ? {
+            create: attachments.map((a: { fileName: string; fileUrl: string; fileSize?: number; mimeType?: string }) => ({
+              fileName: a.fileName,
+              fileUrl: a.fileUrl,
+              fileSize: a.fileSize,
+              mimeType: a.mimeType,
+            })),
+          }
+        : undefined,
     },
     include: {
       sender: { select: { id: true, name: true, role: true } },
+      attachments: true,
     },
   })
 
-  await prisma.thread.update({
-    where: { id: thread.id },
-    data: { updatedAt: new Date() },
-  })
+  await prisma.thread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } })
 
   return NextResponse.json({ thread, message }, { status: 201 })
 }

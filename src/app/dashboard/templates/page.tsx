@@ -287,7 +287,7 @@ export default function TemplatesPage() {
                   {selectedFile ? (
                     <div className="flex items-center justify-center gap-2 text-green-700">
                       <CheckCircle className="w-5 h-5" />
-                      <span className="text-sm font-medium truncate max-w-[200px]">{selectedFile.name}</span>
+                      <span className="text-sm font-medium truncate max-w-50">{selectedFile.name}</span>
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedFile(null) }}
                         className="text-gray-400 hover:text-red-500 ml-1"
@@ -316,7 +316,7 @@ export default function TemplatesPage() {
 
               {uploadError && (
                 <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 px-3 py-2 rounded-lg">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <AlertCircle className="w-4 h-4 shrink-0" />
                   {uploadError}
                 </div>
               )}

@@ -63,6 +63,7 @@ export async function GET(
     documents: project.documents.map((d) => ({
       ...d,
       createdAt: d.createdAt.toISOString(),
+      expiryDate: d.expiryDate?.toISOString() ?? null,
     })),
     personnelRecords: project.personnelRecords.map((r) => ({
       ...r,
