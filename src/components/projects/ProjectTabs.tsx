@@ -267,6 +267,7 @@ export default function ProjectTabs({
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   const perms = can(userRole);
 
@@ -338,8 +339,63 @@ export default function ProjectTabs({
     else toast.error("Failed to remove team member");
   }
 
+  async function downloadReport() {
+    setReportLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/report`);
+      if (!res.ok) {
+        let message = "Failed to generate report";
+        try {
+          const data = await res.json();
+          if (data?.error) message = data.error;
+        } catch {
+          // response wasn't JSON; keep default message
+        }
+        toast.error(message);
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="(.+?)"/);
+      const filename = match?.[1] ?? `progress_report_${project.sanctionNumber}.pdf`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Report downloaded");
+    } catch {
+      toast.error("Network error while generating report");
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   return (
     <div>
+      {/* ── Header actions ── */}
+      {perms.viewFinancials && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button
+            onClick={downloadReport}
+            disabled={reportLoading}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: reportLoading ? "#A5B4FC" : "#5B4FE9",
+              fontSize: 13, fontWeight: 600, color: "white",
+              cursor: reportLoading ? "default" : "pointer",
+            }}
+          >
+            {reportLoading ? "Generating…" : "📄 Generate Report"}
+          </button>
+        </div>
+      )}
+
       {/* ── Tab bar ── */}
       <div style={{
         display: "flex", gap: 4, borderBottom: "2px solid #EBEBF0",
