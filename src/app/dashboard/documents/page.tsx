@@ -53,6 +53,7 @@ function getFileIcon(mimeType: string | null) {
 }
 
 export default function DocumentsPage() {
+  // --- existing state ---
   const [documents, setDocuments] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,22 +72,34 @@ export default function DocumentsPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // --- AI tab state ---
+  const [activeTab, setActiveTab] = useState<"documents" | "ai">("documents");
+  const [aiProjectId, setAiProjectId] = useState("");
+  const [aiFile, setAiFile] = useState<File | null>(null);
+  const [aiUploading, setAiUploading] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiAnswer, setAiAnswer] = useState("");
+  const [aiAsking, setAiAsking] = useState(false);
+  const [aiDocs, setAiDocs] = useState<string[]>([]);
+  const [aiError, setAiError] = useState("");
+  const aiFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     fetchDocuments();
     fetchProjects();
   }, []);
 
   async function fetchDocuments() {
-  setLoading(true);
-  try {
-    const res = await fetch("/api/documents");
-    const data = await res.json();
-    setDocuments(Array.isArray(data) ? data : []);
-  } catch {
-    setDocuments([]);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/documents");
+      const data = await res.json();
+      setDocuments(Array.isArray(data) ? data : []);
+    } catch {
+      setDocuments([]);
+    }
+    setLoading(false);
   }
-  setLoading(false);
-}
 
   async function fetchProjects() {
     const res = await fetch("/api/projects");
@@ -138,6 +151,53 @@ export default function DocumentsPage() {
     window.open(fileUrl, "_blank");
   }
 
+  // --- AI functions ---
+  async function fetchAiDocs(projectId: string) {
+    const res = await fetch(`/api/rag/documents?projectId=${projectId}`);
+    const data = await res.json();
+    setAiDocs(data.documents || []);
+  }
+
+  async function handleAiUpload() {
+    if (!aiFile || !aiProjectId) {
+      setAiError("Select a project and file.");
+      return;
+    }
+    setAiUploading(true);
+    setAiError("");
+    const formData = new FormData();
+    formData.append("file", aiFile);
+    formData.append("projectId", aiProjectId);
+    const res = await fetch("/api/rag/upload", { method: "POST", body: formData });
+    const data = await res.json();
+    if (data.error) {
+      setAiError(data.error);
+    } else {
+      setAiFile(null);
+      fetchAiDocs(aiProjectId);
+    }
+    setAiUploading(false);
+  }
+
+  async function handleAiAsk() {
+    if (!aiProjectId || !aiQuestion) {
+      setAiError("Select a project and enter a question.");
+      return;
+    }
+    setAiAsking(true);
+    setAiError("");
+    setAiAnswer("");
+    const res = await fetch("/api/rag/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: aiProjectId, question: aiQuestion }),
+    });
+    const data = await res.json();
+    if (data.error) setAiError(data.error);
+    else setAiAnswer(data.answer);
+    setAiAsking(false);
+  }
+
   const filtered = documents.filter((d) => {
     const matchType = filterType === "ALL" || d.documentType === filterType;
     const matchProject =
@@ -152,181 +212,321 @@ export default function DocumentsPage() {
   return (
     <div className="min-h-screen bg-[#F5F5F7] p-6">
       <div className="max-w-6xl mx-auto">
+        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-[20px] font-semibold text-[#1A1A2E]">Documents</h1>
             <p className="text-[13px] text-[#9999AA] mt-0.5">All project files and documents</p>
           </div>
+          {activeTab === "documents" && (
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] transition-colors"
+            >
+              + Upload Document
+            </button>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
           <button
-            onClick={() => setShowUpload(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] transition-colors"
+            onClick={() => setActiveTab("documents")}
+            className={`px-4 py-2 text-[13px] font-medium rounded-lg transition-colors ${
+              activeTab === "documents"
+                ? "bg-[#5B4FE9] text-white"
+                : "bg-white border border-[#EBEBF0] text-[#555570] hover:bg-[#F5F5F7]"
+            }`}
           >
-            + Upload Document
+            📂 Documents
+          </button>
+          <button
+            onClick={() => setActiveTab("ai")}
+            className={`px-4 py-2 text-[13px] font-medium rounded-lg transition-colors ${
+              activeTab === "ai"
+                ? "bg-[#5B4FE9] text-white"
+                : "bg-white border border-[#EBEBF0] text-[#555570] hover:bg-[#F5F5F7]"
+            }`}
+          >
+            🤖 AI Assistant
           </button>
         </div>
 
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-[13px] rounded-lg">
-            {error}
-          </div>
-        )}
-        {success && (
-          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] rounded-lg">
-            {success}
-          </div>
-        )}
+        {/* ───── AI TAB ───── */}
+        {activeTab === "ai" && (
+          <div className="space-y-4">
+            {aiError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-[13px] rounded-lg">
+                {aiError}
+              </div>
+            )}
 
-        {showUpload && (
-          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <h2 className="text-[16px] font-semibold text-[#1A1A2E] mb-4">Upload Document</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[12px] font-medium text-[#555570] mb-1 block">Document Title</label>
+            {/* Project selector */}
+            <div className="bg-white border border-[#EBEBF0] rounded-xl p-4">
+              <label className="text-[12px] font-medium text-[#555570] mb-2 block">
+                Select Project
+              </label>
+              <select
+                className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
+                value={aiProjectId}
+                onChange={(e) => {
+                  setAiProjectId(e.target.value);
+                  if (e.target.value) fetchAiDocs(e.target.value);
+                }}
+              >
+                <option value="">Select project...</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.sanctionNumber} — {p.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Upload for AI */}
+            <div className="bg-white border border-[#EBEBF0] rounded-xl p-4">
+              <p className="text-[13px] font-semibold text-[#1A1A2E] mb-3">
+                Upload Document for AI
+              </p>
+              <div className="flex gap-3 items-center">
+                <div
+                  className="flex-1 border-2 border-dashed border-[#EBEBF0] rounded-lg p-3 text-center cursor-pointer hover:border-[#5B4FE9] transition-colors"
+                  onClick={() => aiFileRef.current?.click()}
+                >
+                  <p className="text-[13px] text-[#9999AA]">
+                    {aiFile ? aiFile.name : "Click to select file (PDF, DOCX, XLSX, CSV, TXT)"}
+                  </p>
                   <input
-                    className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
-                    placeholder="e.g. Progress Report Q1 2025"
-                    value={form.title}
-                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                    ref={aiFileRef}
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.docx,.xlsx,.xls,.csv,.txt"
+                    onChange={(e) => setAiFile(e.target.files?.[0] || null)}
                   />
                 </div>
-                <div>
-                  <label className="text-[12px] font-medium text-[#555570] mb-1 block">Document Type</label>
-                  <select
-                    className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
-                    value={form.documentType}
-                    onChange={(e) => setForm((f) => ({ ...f, documentType: e.target.value }))}
-                  >
-                    {DOC_TYPES.map((t) => (
-                      <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+                <button
+                  onClick={handleAiUpload}
+                  disabled={aiUploading}
+                  className="px-4 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] disabled:opacity-50"
+                >
+                  {aiUploading ? "Processing..." : "Ingest"}
+                </button>
+              </div>
+
+              {aiDocs.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[11px] text-[#9999AA] mb-1">Ingested documents:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {aiDocs.map((doc) => (
+                      <span
+                        key={doc}
+                        className="px-2 py-1 bg-[#EEF0FF] text-[#5B4FE9] text-[11px] rounded-md"
+                      >
+                        {doc}
+                      </span>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[12px] font-medium text-[#555570] mb-1 block">Project</label>
-                  <select
-                    className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
-                    value={form.projectId}
-                    onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))}
-                  >
-                    <option value="">Select project...</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.sanctionNumber} — {p.title}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[12px] font-medium text-[#555570] mb-1 block">File (max 10MB)</label>
-                  <div
-                    className="border-2 border-dashed border-[#EBEBF0] rounded-lg p-4 text-center cursor-pointer hover:border-[#5B4FE9] transition-colors"
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    {selectedFile ? (
-                      <p className="text-[13px] text-[#5B4FE9] font-medium">{selectedFile.name}</p>
-                    ) : (
-                      <p className="text-[13px] text-[#9999AA]">Click to select file</p>
-                    )}
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
-                      onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                    />
                   </div>
                 </div>
-              </div>
-              <div className="flex gap-3 mt-5">
+              )}
+            </div>
+
+            {/* Ask question */}
+            <div className="bg-white border border-[#EBEBF0] rounded-xl p-4">
+              <p className="text-[13px] font-semibold text-[#1A1A2E] mb-3">Ask a Question</p>
+              <div className="flex gap-3">
+                <input
+                  className="flex-1 border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
+                  placeholder="e.g. Who wrote this paper? What is the budget?"
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAiAsk()}
+                />
                 <button
-                  onClick={() => { setShowUpload(false); setError(""); setSelectedFile(null); }}
-                  className="flex-1 py-2 border border-[#EBEBF0] text-[13px] font-medium text-[#555570] rounded-lg hover:bg-[#F5F5F7]"
+                  onClick={handleAiAsk}
+                  disabled={aiAsking}
+                  className="px-4 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] disabled:opacity-50"
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleUpload}
-                  disabled={uploading}
-                  className="flex-1 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] disabled:opacity-50"
-                >
-                  {uploading ? "Uploading..." : "Upload"}
+                  {aiAsking ? "Thinking..." : "Ask"}
                 </button>
               </div>
+
+              {aiAnswer && (
+                <div className="mt-4 p-4 bg-[#F5F5F7] rounded-xl">
+                  <p className="text-[11px] font-medium text-[#9999AA] mb-1">Answer:</p>
+                  <p className="text-[13px] text-[#1A1A2E] whitespace-pre-wrap">{aiAnswer}</p>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        <div className="bg-white border border-[#EBEBF0] rounded-xl p-4 mb-4 flex flex-wrap gap-3">
-          <input
-            className="flex-1 min-w-[180px] border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
-            placeholder="Search documents..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            className="border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          >
-            <option value="ALL">All Types</option>
-            {DOC_TYPES.map((t) => (
-              <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
-            ))}
-          </select>
-          <select
-            className="border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value)}
-          >
-            <option value="ALL">All Projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.sanctionNumber}>{p.sanctionNumber}</option>
-            ))}
-          </select>
-        </div>
+        {/* ───── DOCUMENTS TAB ───── */}
+        {activeTab === "documents" && (
+          <>
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-[13px] rounded-lg">
+                {error}
+              </div>
+            )}
+            {success && (
+              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] rounded-lg">
+                {success}
+              </div>
+            )}
 
-        {loading ? (
-          <div className="text-center py-16 text-[#9999AA] text-[13px]">Loading documents...</div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white border border-[#EBEBF0] rounded-2xl p-16 text-center">
-            <p className="text-4xl mb-3">📂</p>
-            <p className="text-[14px] font-semibold text-[#1A1A2E] mb-1">No documents found</p>
-            <p className="text-[13px] text-[#9999AA]">Upload your first document to get started.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((doc) => (
-              <div key={doc.id} className="bg-white border border-[#EBEBF0] rounded-xl p-4 hover:shadow-md transition-all">
-                <div className="flex items-start gap-3">
-                  <div className="text-3xl">{getFileIcon(doc.mimeType)}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-[#1A1A2E] truncate">{doc.title}</p>
-                    <p className="text-[11px] text-[#9999AA] mt-0.5">{DOC_TYPE_LABELS[doc.documentType]}</p>
-                    <p className="text-[11px] text-[#9999AA] truncate mt-0.5">{doc.project?.sanctionNumber}</p>
+            {showUpload && (
+              <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+                  <h2 className="text-[16px] font-semibold text-[#1A1A2E] mb-4">Upload Document</h2>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[12px] font-medium text-[#555570] mb-1 block">Document Title</label>
+                      <input
+                        className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
+                        placeholder="e.g. Progress Report Q1 2025"
+                        value={form.title}
+                        onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[12px] font-medium text-[#555570] mb-1 block">Document Type</label>
+                      <select
+                        className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
+                        value={form.documentType}
+                        onChange={(e) => setForm((f) => ({ ...f, documentType: e.target.value }))}
+                      >
+                        {DOC_TYPES.map((t) => (
+                          <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[12px] font-medium text-[#555570] mb-1 block">Project</label>
+                      <select
+                        className="w-full border border-[#EBEBF0] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#5B4FE9]"
+                        value={form.projectId}
+                        onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))}
+                      >
+                        <option value="">Select project...</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.sanctionNumber} — {p.title}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[12px] font-medium text-[#555570] mb-1 block">File (max 10MB)</label>
+                      <div
+                        className="border-2 border-dashed border-[#EBEBF0] rounded-lg p-4 text-center cursor-pointer hover:border-[#5B4FE9] transition-colors"
+                        onClick={() => fileRef.current?.click()}
+                      >
+                        {selectedFile ? (
+                          <p className="text-[13px] text-[#5B4FE9] font-medium">{selectedFile.name}</p>
+                        ) : (
+                          <p className="text-[13px] text-[#9999AA]">Click to select file</p>
+                        )}
+                        <input
+                          ref={fileRef}
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+                          onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#F0F0F5]">
-                  <div>
-                    <p className="text-[11px] text-[#9999AA]">{doc.fileSize ? formatBytes(doc.fileSize) : "—"}</p>
-                    <p className="text-[11px] text-[#9999AA]">{new Date(doc.createdAt).toLocaleDateString("en-IN")}</p>
-                  </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3 mt-5">
                     <button
-                      onClick={() => handleView(doc.fileUrl)}
-                      className="px-3 py-1.5 text-[11px] font-medium bg-[#EEF0FF] text-[#5B4FE9] rounded-lg hover:bg-[#E0E4FF] transition-colors"
+                      onClick={() => { setShowUpload(false); setError(""); setSelectedFile(null); }}
+                      className="flex-1 py-2 border border-[#EBEBF0] text-[13px] font-medium text-[#555570] rounded-lg hover:bg-[#F5F5F7]"
                     >
-                      View
+                      Cancel
                     </button>
                     <button
-                      onClick={() => handleDelete(doc.id)}
-                      className="px-3 py-1.5 text-[11px] font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                      onClick={handleUpload}
+                      disabled={uploading}
+                      className="flex-1 py-2 bg-[#5B4FE9] text-white text-[13px] font-medium rounded-lg hover:bg-[#4A3FD8] disabled:opacity-50"
                     >
-                      Delete
+                      {uploading ? "Uploading..." : "Upload"}
                     </button>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            )}
+
+            <div className="bg-white border border-[#EBEBF0] rounded-xl p-4 mb-4 flex flex-wrap gap-3">
+              <input
+                className="flex-1 min-w-[180px] border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
+                placeholder="Search documents..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select
+                className="border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+              >
+                <option value="ALL">All Types</option>
+                {DOC_TYPES.map((t) => (
+                  <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+                ))}
+              </select>
+              <select
+                className="border border-[#EBEBF0] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#5B4FE9]"
+                value={filterProject}
+                onChange={(e) => setFilterProject(e.target.value)}
+              >
+                <option value="ALL">All Projects</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.sanctionNumber}>{p.sanctionNumber}</option>
+                ))}
+              </select>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-16 text-[#9999AA] text-[13px]">Loading documents...</div>
+            ) : filtered.length === 0 ? (
+              <div className="bg-white border border-[#EBEBF0] rounded-2xl p-16 text-center">
+                <p className="text-4xl mb-3">📂</p>
+                <p className="text-[14px] font-semibold text-[#1A1A2E] mb-1">No documents found</p>
+                <p className="text-[13px] text-[#9999AA]">Upload your first document to get started.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {filtered.map((doc) => (
+                  <div key={doc.id} className="bg-white border border-[#EBEBF0] rounded-xl p-4 hover:shadow-md transition-all">
+                    <div className="flex items-start gap-3">
+                      <div className="text-3xl">{getFileIcon(doc.mimeType)}</div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold text-[#1A1A2E] truncate">{doc.title}</p>
+                        <p className="text-[11px] text-[#9999AA] mt-0.5">{DOC_TYPE_LABELS[doc.documentType]}</p>
+                        <p className="text-[11px] text-[#9999AA] truncate mt-0.5">{doc.project?.sanctionNumber}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#F0F0F5]">
+                      <div>
+                        <p className="text-[11px] text-[#9999AA]">{doc.fileSize ? formatBytes(doc.fileSize) : "—"}</p>
+                        <p className="text-[11px] text-[#9999AA]">{new Date(doc.createdAt).toLocaleDateString("en-IN")}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleView(doc.fileUrl)}
+                          className="px-3 py-1.5 text-[11px] font-medium bg-[#EEF0FF] text-[#5B4FE9] rounded-lg hover:bg-[#E0E4FF] transition-colors"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc.id)}
+                          className="px-3 py-1.5 text-[11px] font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
