@@ -1,190 +1,160 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState, useRef } from 'react';
+import { Bell, CheckCheck, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
-type Notification = {
+interface Notification {
   id: string;
   title: string;
   message: string;
-  type: string;
   read: boolean;
-  link: string | null;
+  link?: string;
   createdAt: string;
-};
-
-function timeAgo(date: string) {
-  const diff = Date.now() - new Date(date).getTime();
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
-}
-
-function typeColor(type: string) {
-  if (type === "SUCCESS") return "bg-emerald-500";
-  if (type === "WARNING") return "bg-amber-500";
-  if (type === "ERROR") return "bg-red-500";
-  return "bg-[#5B4FE9]";
-}
-
-async function loadNotifications() {
-  const res = await fetch("/api/notifications");
-  return res.json();
 }
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [clearing, setClearing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
   const ref = useRef<HTMLDivElement>(null);
 
-  function refresh() {
-    loadNotifications()
-      .then((data) => {
-        setNotifications(data.notifications || []);
-        setUnreadCount(data.unreadCount || 0);
-      })
-      .catch(() => {});
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  async function fetchNotifications() {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/notifications');
+      const data = await res.json();
+      setNotifications(data.notifications ?? []);
+      setUnreadCount(data.unreadCount ?? 0);
+    } catch {}
+    setLoading(false);
   }
 
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  const load = async () => {
+    await fetchNotifications();
+  };
+  load();
+  const interval = setInterval(fetchNotifications, 5 * 60 * 1000);
+  return () => clearInterval(interval);
+}, []);
 
   async function markAllRead() {
-    await fetch("/api/notifications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+    await fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ markAllRead: true }),
     });
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadCount(0);
   }
 
-  async function markRead(id: string) {
-    await fetch("/api/notifications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
+  async function clearAll() {
+    await fetch('/api/notifications', { method: 'DELETE' });
+    setNotifications([]);
+    setUnreadCount(0);
   }
 
-  async function clearAll() {
-    setClearing(true);
-    try {
-      await fetch("/api/notifications", { method: "DELETE" });
-      setNotifications([]);
-      setUnreadCount(0);
-    } catch {
-      // silent
-    } finally {
-      setClearing(false);
+  async function markOneRead(n: Notification) {
+    if (!n.read) {
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: n.id }),
+      });
+      setUnreadCount((c) => Math.max(0, c - 1));
+      setNotifications((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, read: true } : x))
+      );
+    }
+    if (n.link) {
+      router.push(n.link);
+      setOpen(false);
     }
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((o) => !o)}
-        className="relative w-8 h-8 flex items-center justify-center rounded-lg border border-[#EBEBF0] text-[#555570] hover:bg-[#F5F5F7] transition-colors"
+        onClick={() => { setOpen((o) => !o); if (!open) fetchNotifications(); }}
+        className="relative p-2 rounded-full hover:bg-gray-100 transition-colors"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
+        <Bell className="w-5 h-5 text-gray-600" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-            {unreadCount > 9 ? "9+" : unreadCount}
+          <span className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center px-0.5">
+            {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 w-80 bg-white border border-[#EBEBF0] rounded-xl shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-80 bg-white border rounded-xl shadow-xl z-50 overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#EBEBF0]">
-            <p className="text-[13px] font-semibold text-[#1A1A2E]">
-              Notifications
+          <div className="flex items-center justify-between px-4 py-2.5 border-b bg-gray-50">
+            <span className="font-semibold text-sm text-gray-700">Notifications</span>
+            <div className="flex gap-2">
               {unreadCount > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full">
-                  {unreadCount} new
-                </span>
+                <button
+                  onClick={markAllRead}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+                </button>
               )}
-            </p>
-            {unreadCount > 0 && (
-              <button
-                onClick={markAllRead}
-                className="text-[11px] text-[#5B4FE9] font-medium hover:underline"
-              >
-                Mark all read
-              </button>
-            )}
+              {notifications.length > 0 && (
+                <button
+                  onClick={clearAll}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:underline"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Clear
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* List */}
-          <div className="max-h-72 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="py-8 text-center">
-                <p className="text-2xl mb-2">🔔</p>
-                <p className="text-[13px] text-[#9999AA]">No notifications yet</p>
-              </div>
-            ) : (
-              notifications.map((n) => (
-                <div
+          {/* Body */}
+          {loading ? (
+            <div className="p-6 text-center text-gray-400 text-sm">Loading...</div>
+          ) : notifications.length === 0 ? (
+            <div className="p-6 text-center text-gray-400 text-sm">
+              <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              No notifications yet
+            </div>
+          ) : (
+            <ul className="max-h-80 overflow-y-auto divide-y">
+              {notifications.map((n) => (
+                <li
                   key={n.id}
-                  onClick={() => !n.read && markRead(n.id)}
-                  className={`flex gap-3 px-4 py-3 border-b border-[#F5F5F7] cursor-pointer hover:bg-[#F5F5F7] transition-colors ${
-                    !n.read ? "bg-[#F8F8FF]" : ""
+                  onClick={() => markOneRead(n)}
+                  className={`px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors ${
+                    !n.read ? 'bg-blue-50/40' : ''
                   }`}
                 >
-                  <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${typeColor(n.type)}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12px] font-semibold text-[#1A1A2E]">{n.title}</p>
-                    <p className="text-[11px] text-[#9999AA] mt-0.5 line-clamp-2">{n.message}</p>
-                    <p className="text-[10px] text-[#BBBBCC] mt-1">{timeAgo(n.createdAt)}</p>
+                  <div className="flex items-start gap-2">
+                    {!n.read && (
+                      <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                    )}
+                    <p className={`text-sm ${!n.read ? 'font-medium text-gray-800' : 'text-gray-600'}`}>
+                      {n.message}
+                    </p>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Footer — clear history */}
-          {notifications.length > 0 && (
-            <div className="px-4 py-2.5 border-t border-[#EBEBF0] flex justify-end">
-              <button
-                onClick={clearAll}
-                disabled={clearing}
-                className="flex items-center gap-1.5 text-[11px] text-[#9999AA] hover:text-red-500 transition-colors disabled:opacity-50"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                </svg>
-                {clearing ? "Clearing…" : "Clear history"}
-              </button>
-            </div>
+                  <p className="text-xs text-gray-400 mt-1 ml-4">
+                    {new Date(n.createdAt).toLocaleDateString()}
+                  </p>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
