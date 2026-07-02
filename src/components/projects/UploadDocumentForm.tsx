@@ -81,7 +81,7 @@ export default function UploadDocumentForm({ projectId, onSuccess }: UploadDocum
         onClick={() => setOpen(true)}
         style={{
           display: "inline-flex", alignItems: "center", gap: 6,
-          background: "#5B4FE9", color: "#fff", fontSize: 12, fontWeight: 600,
+          background: "#5B4FE9", color: "#fff", fontSize: 12, fontWeight: 601,
           padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer",
         }}
       >
