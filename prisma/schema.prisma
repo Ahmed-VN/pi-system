@@ -48,6 +48,27 @@ enum BudgetCategory {
   NON_RECURRING
 }
 
+enum MessageType {
+  CHAT
+  DAILY_REPORT
+  FEEDBACK
+}
+
+enum ProcurementStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  RECEIVED
+  PAID
+}
+
+enum SourcingType {
+  GEM
+  NON_GEM
+  PROPRIETARY
+}
+
 model User {
   id          String   @id @default(cuid())
   name        String
@@ -61,14 +82,15 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  projectsAsPi      Project[]         @relation("ProjectPI")
-  personnelRecords  PersonnelRecord[]
-  uploadedDocuments Document[]
-  createdMilestones Milestone[]
-  notifications     Notification[]
-  messages          Message[]         @relation("UserMessages")
-  anrfTemplates  AnrfTemplate[]
- 
+  projectsAsPi         Project[]            @relation("ProjectPI")
+  personnelRecords     PersonnelRecord[]
+  uploadedDocuments    Document[]
+  createdMilestones    Milestone[]
+  notifications        Notification[]
+  messages             Message[]            @relation("UserMessages")
+  anrfTemplates        AnrfTemplate[]
+  procurementRequests  ProcurementRequest[] @relation("ProcurementSubmitter")
+  approvedRequests     ProcurementRequest[] @relation("ProcurementApprover")
 
   @@map("users")
 }
@@ -89,13 +111,15 @@ model Project {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  pi               User              @relation("ProjectPI", fields: [piId], references: [id])
-  milestones       Milestone[]
-  documents        Document[]
-  budgetHeads      BudgetHead[]
-  personnelRecords PersonnelRecord[]
-  expenditures     Expenditure[]
-  threads          Thread[]
+  pi                  User                 @relation("ProjectPI", fields: [piId], references: [id])
+  milestones          Milestone[]
+  documents           Document[]
+  budgetHeads         BudgetHead[]
+  personnelRecords    PersonnelRecord[]
+  expenditures        Expenditure[]
+  threads             Thread[]
+  assets              Asset[]
+  procurementRequests ProcurementRequest[]
 
   @@index([piId])
   @@index([status])
@@ -112,8 +136,9 @@ model BudgetHead {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  expenditures Expenditure[]
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  expenditures        Expenditure[]
+  procurementRequests ProcurementRequest[]
 
   @@index([projectId])
   @@map("budget_heads")
@@ -131,6 +156,8 @@ model Expenditure {
 
   project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   budgetHead BudgetHead @relation(fields: [budgetHeadId], references: [id], onDelete: Cascade)
+
+  paymentReleaseRequest PaymentReleaseRequest?
 
   @@index([projectId])
   @@map("expenditures")
@@ -156,19 +183,22 @@ model Milestone {
 }
 
 model Document {
-  id           String       @id @default(cuid())
-  projectId    String
-  uploadedById String
-  title        String
-  documentType DocumentType
-  fileUrl      String
-  fileSize     Int?
-  mimeType     String?
-  expiryDate   DateTime?
-  createdAt    DateTime     @default(now())
+  id                   String       @id @default(cuid())
+  projectId            String
+  uploadedById         String
+  title                String
+  documentType         DocumentType
+  fileUrl              String
+  fileSize             Int?
+  mimeType             String?
+  expiryDate           DateTime?
+  createdAt            DateTime     @default(now())
+  procurementRequestId String?
+  checklistKey         String?      // which checklist item (e.g. "REQUISITION_FORM") this upload satisfies
 
-  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+  procurementRequest ProcurementRequest? @relation(fields: [procurementRequestId], references: [id])
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy          User                @relation(fields: [uploadedById], references: [id])
 
   @@index([projectId])
   @@map("documents")
@@ -209,12 +239,6 @@ model Notification {
   @@map("notifications")
 }
 
-enum MessageType {
-  CHAT
-  DAILY_REPORT
-  FEEDBACK
-}
-
 model Thread {
   id        String    @id @default(cuid())
   projectId String
@@ -226,18 +250,18 @@ model Thread {
 }
 
 model Message {
-  id          String      @id @default(cuid())
+  id          String              @id @default(cuid())
   threadId    String
-  thread      Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  thread      Thread              @relation(fields: [threadId], references: [id], onDelete: Cascade)
   senderId    String
-  sender      User        @relation("UserMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  sender      User                @relation("UserMessages", fields: [senderId], references: [id], onDelete: Cascade)
   content     String
-  messageType MessageType @default(CHAT)
+  messageType MessageType         @default(CHAT)
   parentId    String?
-  parent      Message?    @relation("MessageReplies", fields: [parentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
-  replies     Message[]   @relation("MessageReplies")
-  isRead      Boolean     @default(false)
-  createdAt   DateTime    @default(now())
+  parent      Message?            @relation("MessageReplies", fields: [parentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  replies     Message[]           @relation("MessageReplies")
+  isRead      Boolean             @default(false)
+  createdAt   DateTime            @default(now())
   attachments MessageAttachment[]
 }
 
@@ -250,10 +274,10 @@ model AnrfTemplate {
   fileSize     String
   filePath     String
   createdAt    DateTime @default(now())
- 
+
   uploadedById String
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
- 
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
   @@map("anrf_templates")
 }
 
@@ -269,4 +293,100 @@ model MessageAttachment {
 
   @@index([messageId])
   @@map("message_attachments")
+}
+
+model Asset {
+  id                   String   @id @default(cuid())
+  projectId            String
+  procurementRequestId String?
+  name                 String
+  category             String?
+  purchaseAmount       Decimal  @db.Decimal(15, 2)
+  acquisitionDate      DateTime
+  createdAt            DateTime @default(now())
+
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  procurementRequest ProcurementRequest? @relation(fields: [procurementRequestId], references: [id])
+
+  @@index([projectId])
+  @@map("assets")
+}
+
+// ============================================================
+// PROCUREMENT MODULE — Simplified ANRF Workflow
+// ============================================================
+
+model ProcurementRequest {
+  id           String @id @default(cuid())
+  projectId    String
+  budgetHeadId String
+
+  submittedById String
+
+  itemName        String
+  itemDescription String
+  quantity        Int
+  estimatedCost   Decimal @db.Decimal(15, 2)
+  justification   String
+
+  sourcingType   SourcingType @default(NON_GEM)
+  vendorName     String?
+  vendorAddress  String?
+  vendorGst      String?
+  quoteReference String?
+
+  status          ProcurementStatus @default(DRAFT)
+  rejectionReason String?
+
+  approvedById String?
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgetHead  BudgetHead @relation(fields: [budgetHeadId], references: [id], onDelete: Cascade)
+  submittedBy User       @relation("ProcurementSubmitter", fields: [submittedById], references: [id])
+  approvedBy  User?      @relation("ProcurementApprover", fields: [approvedById], references: [id])
+
+  documents Document[]
+  assets    Asset[]
+
+  goodsReceipt          GoodsReceipt?
+  paymentReleaseRequest PaymentReleaseRequest?
+
+  @@index([projectId])
+  @@index([status])
+  @@map("procurement_requests")
+}
+
+model GoodsReceipt {
+  id                     String    @id @default(cuid())
+  procurementRequestId   String    @unique
+  deliveryDate           DateTime
+  installationDate       DateTime?
+  condition              String
+  installationReportNote String?
+  createdAt              DateTime  @default(now())
+
+  procurementRequest ProcurementRequest @relation(fields: [procurementRequestId], references: [id], onDelete: Cascade)
+
+  @@map("goods_receipts")
+}
+
+model PaymentReleaseRequest {
+  id                   String    @id @default(cuid())
+  procurementRequestId String    @unique
+  invoiceNumber        String
+  invoiceAmount        Decimal   @db.Decimal(15, 2)
+  invoiceDate          DateTime
+  checklistComplete    Boolean   @default(false)
+  releasedAt           DateTime?
+  expenditureId        String?   @unique
+  createdAt            DateTime  @default(now())
+
+  procurementRequest ProcurementRequest @relation(fields: [procurementRequestId], references: [id], onDelete: Cascade)
+  expenditure         Expenditure?       @relation(fields: [expenditureId], references: [id])
+
+  @@map("payment_release_requests")
 }

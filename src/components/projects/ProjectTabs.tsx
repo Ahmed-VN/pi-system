@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import AddMilestoneForm from "./AddMilestoneForm";
 import MilestoneStatusButton from "./MilestoneStatusButton";
@@ -31,13 +31,38 @@ interface PersonnelRecord {
 }
 interface Document {
   id: string; name: string; type: string; url: string;
-  uploadedAt: string; expiryDate?: string | null;  
+  uploadedAt: string; expiryDate?: string | null;
 }
 interface Project {
   id: string; title: string; sanctionNumber: string; grantType: string;
   status: string; totalBudget: number; startDate: string; endDate: string;
   description?: string | null; pi: User; milestones: Milestone[];
   budgetHeads: BudgetHead[]; personnelRecords: PersonnelRecord[]; documents: Document[];
+}
+
+// ─── Procurement Types ────────────────────────────────────────────────────────
+
+type ProcurementStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "RECEIVED" | "PAID";
+
+interface ProcurementRequest {
+  id: string;
+  itemName: string;
+  itemDescription: string;
+  quantity: number;
+  estimatedCost: number;
+  justification: string;
+  sourcingType: string;
+  vendorName: string | null;
+  vendorAddress: string | null;
+  vendorGst: string | null;
+  quoteReference: string | null;
+  status: ProcurementStatus;
+  rejectionReason: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  submittedBy: { id: string; name: string; role: string };
+  approvedBy: { id: string; name: string } | null;
+  budgetHead: { id: string; headName: string; category: string };
 }
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
@@ -56,6 +81,8 @@ function can(role: string) {
     deleteBudgetHead:  role === "PI",
     uploadDocument:    role === "PI" || role === "CO_PI" || role === "JRF",
     deleteDocument:    role === "PI" || role === "CO_PI" || role === "JRF",
+    createProcurement: role === "JRF" || role === "CO_PI",
+    reviewProcurement: role === "PI",
   };
 }
 
@@ -76,28 +103,32 @@ const MILESTONE_STATUS: Record<string, { label: string; bg: string; color: strin
   DELAYED:     { label: "Delayed",     bg: "#FFEBEE", color: "#C62828" },
 };
 
+const PROCUREMENT_STATUS: Record<ProcurementStatus, { label: string; bg: string; color: string; border: string }> = {
+  DRAFT:     { label: "Draft",          bg: "#F5F5F7", color: "#9999AA", border: "#EBEBF0" },
+  SUBMITTED: { label: "Pending Review", bg: "#E8EAF6", color: "#3949AB", border: "#C5CAE9" },
+  APPROVED:  { label: "Approved",       bg: "#E8F5E9", color: "#2E7D32", border: "#A5D6A7" },
+  REJECTED:  { label: "Rejected",       bg: "#FFEBEE", color: "#C62828", border: "#FFCDD2" },
+  RECEIVED:  { label: "Goods Received", bg: "#E0F2F1", color: "#00695C", border: "#80CBC4" },
+  PAID:      { label: "Paid",           bg: "#EDE7F6", color: "#5E35B1", border: "#B39DDB" },
+};
+
 const ROLE_LABELS: Record<string, string> = {
   PI: "Principal Investigator", CO_PI: "Co-PI", JRF: "JRF", ADMIN: "Admin",
 };
 
 const AVATAR_COLORS = ["#5B4FE9","#7C6FF7","#4CAF50","#2196F3","#FF9800","#E91E63"];
 
-type Tab = "overview" | "milestones" | "team" | "financials" | "documents" | "messages";
+type Tab = "overview" | "milestones" | "team" | "financials" | "documents" | "procurement" | "messages";
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: "Overview", milestones: "Milestones", team: "Team",
-  financials: "Financials", documents: "Documents", messages: "💬 Messages",
+  financials: "Financials", documents: "Documents", procurement: "🛒 Procurement",
+  messages: "💬 Messages",
 };
 
 // ─── Inline Add Budget Head Form ──────────────────────────────────────────────
 
-function AddBudgetHeadInline({
-  projectId,
-  onSuccess,
-}: {
-  projectId: string;
-  onSuccess: () => void;
-}) {
+function AddBudgetHeadInline({ projectId, onSuccess }: { projectId: string; onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [headName, setHeadName] = useState("");
   const [category, setCategory] = useState<"RECURRING" | "NON_RECURRING">("RECURRING");
@@ -121,136 +152,552 @@ function AddBudgetHeadInline({
       const res = await fetch("/api/budget-heads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          headName: headName.trim(),
-          category,
-          allocatedAmount: Number(allocatedAmount),
-        }),
+        body: JSON.stringify({ projectId, headName: headName.trim(), category, allocatedAmount: Number(allocatedAmount) }),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "Failed to add budget head"); return; }
       toast.success(`Budget head "${headName}" added`);
-      setHeadName("");
-      setAllocatedAmount("");
-      setCategory("RECURRING");
-      setErrors({});
-      setOpen(false);
+      setHeadName(""); setAllocatedAmount(""); setCategory("RECURRING"); setErrors({}); setOpen(false);
       onSuccess();
-    } catch {
-      toast.error("Network error");
-    } finally {
-      setLoading(false);
-    }
+    } catch { toast.error("Network error"); } finally { setLoading(false); }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        style={{
-          background: "#EEF2FF", border: "1.5px dashed #A5B4FC",
-          borderRadius: 10, padding: "12px 16px", width: "100%",
-          fontSize: 13, fontWeight: 600, color: "#5B4FE9",
-          cursor: "pointer", textAlign: "center",
-        }}
-      >
-        + Add Budget Head
-      </button>
-    );
-  }
+  if (!open) return (
+    <button onClick={() => setOpen(true)} style={{
+      background: "#EEF2FF", border: "1.5px dashed #A5B4FC", borderRadius: 10,
+      padding: "12px 16px", width: "100%", fontSize: 13, fontWeight: 600,
+      color: "#5B4FE9", cursor: "pointer", textAlign: "center",
+    }}>+ Add Budget Head</button>
+  );
 
   return (
-    <div style={{
-      background: "#F9F8FF", border: "1.5px solid #C7D2FE",
-      borderRadius: 12, padding: "16px",
-    }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#5B4FE9", marginBottom: 12 }}>
-        New Budget Head
-      </div>
+    <div style={{ background: "#F9F8FF", border: "1.5px solid #C7D2FE", borderRadius: 12, padding: "16px" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#5B4FE9", marginBottom: 12 }}>New Budget Head</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
-            Head Name *
-          </label>
-          <input
-            value={headName}
-            onChange={(e) => { setHeadName(e.target.value); setErrors((x) => ({ ...x, headName: undefined })); }}
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>Head Name *</label>
+          <input value={headName} onChange={(e) => { setHeadName(e.target.value); setErrors((x) => ({ ...x, headName: undefined })); }}
             placeholder="e.g. Equipment, Travel, Consumables"
-            style={{
-              width: "100%", marginTop: 4, padding: "8px 12px",
-              border: `1.5px solid ${errors.headName ? "#EF4444" : "#E5E7EB"}`,
-              borderRadius: 8, fontSize: 13, color: "#1A1A2E",
-              background: "white", boxSizing: "border-box", outline: "none",
-            }}
-          />
+            style={{ width: "100%", marginTop: 4, padding: "8px 12px", border: `1.5px solid ${errors.headName ? "#EF4444" : "#E5E7EB"}`, borderRadius: 8, fontSize: 13, color: "#1A1A2E", background: "white", boxSizing: "border-box", outline: "none" }} />
           {errors.headName && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.headName}</p>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
-              Category *
-            </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as "RECURRING" | "NON_RECURRING")}
-              style={{
-                width: "100%", marginTop: 4, padding: "8px 12px",
-                border: "1.5px solid #E5E7EB", borderRadius: 8,
-                fontSize: 13, background: "white", cursor: "pointer",
-                boxSizing: "border-box", outline: "none",
-              }}
-            >
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>Category *</label>
+            <select value={category} onChange={(e) => setCategory(e.target.value as "RECURRING" | "NON_RECURRING")}
+              style={{ width: "100%", marginTop: 4, padding: "8px 12px", border: "1.5px solid #E5E7EB", borderRadius: 8, fontSize: 13, background: "white", cursor: "pointer", boxSizing: "border-box", outline: "none" }}>
               <option value="RECURRING">Recurring</option>
               <option value="NON_RECURRING">Non-Recurring</option>
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>
-              Allocated Amount (₹) *
-            </label>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".05em" }}>Allocated Amount (₹) *</label>
             <div style={{ position: "relative", marginTop: 4 }}>
               <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9CA3AF", fontSize: 13 }}>₹</span>
-              <input
-                type="number"
-                min={1}
-                value={allocatedAmount}
+              <input type="number" min={1} value={allocatedAmount}
                 onChange={(e) => { setAllocatedAmount(e.target.value); setErrors((x) => ({ ...x, allocatedAmount: undefined })); }}
                 placeholder="500000"
-                style={{
-                  width: "100%", padding: "8px 12px 8px 24px",
-                  border: `1.5px solid ${errors.allocatedAmount ? "#EF4444" : "#E5E7EB"}`,
-                  borderRadius: 8, fontSize: 13, color: "#1A1A2E",
-                  background: "white", boxSizing: "border-box", outline: "none",
-                }}
-              />
+                style={{ width: "100%", padding: "8px 12px 8px 24px", border: `1.5px solid ${errors.allocatedAmount ? "#EF4444" : "#E5E7EB"}`, borderRadius: 8, fontSize: 13, color: "#1A1A2E", background: "white", boxSizing: "border-box", outline: "none" }} />
             </div>
             {errors.allocatedAmount && <p style={{ fontSize: 11, color: "#EF4444", marginTop: 3 }}>{errors.allocatedAmount}</p>}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-          <button
-            onClick={() => { setOpen(false); setErrors({}); setHeadName(""); setAllocatedAmount(""); }}
-            disabled={loading}
-            style={{
-              padding: "7px 16px", borderRadius: 8, border: "1.5px solid #E5E7EB",
-              background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            style={{
-              padding: "7px 16px", borderRadius: 8, border: "none",
-              background: "#5B4FE9", fontSize: 13, fontWeight: 600, color: "white", cursor: "pointer",
-            }}
-          >
+          <button onClick={() => { setOpen(false); setErrors({}); setHeadName(""); setAllocatedAmount(""); }} disabled={loading}
+            style={{ padding: "7px 16px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleSubmit} disabled={loading}
+            style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#5B4FE9", fontSize: 13, fontWeight: 600, color: "white", cursor: "pointer" }}>
             {loading ? "Saving…" : "Add Budget Head"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Procurement Tab ──────────────────────────────────────────────────────────
+
+function ProcurementTab({
+  project,
+  budgetHeads,
+  userRole,
+  currentUserId,
+  initialRequests,
+}: {
+  project: { id: string; title: string };
+  budgetHeads: BudgetHead[];
+  userRole: string;
+  currentUserId: string;
+  initialRequests: ProcurementRequest[];
+}) {
+  const [requests, setRequests] = useState<ProcurementRequest[]>(initialRequests);
+  const [showForm, setShowForm] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const isPI = userRole === "PI";
+  const canCreate = userRole === "JRF" || userRole === "CO_PI";
+
+  const [form, setForm] = useState({
+    budgetHeadId: "", itemName: "", itemDescription: "",
+    quantity: "1", estimatedCost: "", justification: "",
+    sourcingType: "NON_GEM", vendorName: "", vendorAddress: "",
+    vendorGst: "", quoteReference: "",
+  });
+
+  function setF(field: string, value: string) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  async function reload() {
+    const res = await fetch(`/api/procurement/requests?projectId=${project.id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setRequests(data);
+    }
+  }
+
+  async function submitForm(submitNow: boolean) {
+    if (!form.budgetHeadId || !form.itemName.trim() || !form.itemDescription.trim() ||
+        !form.quantity || !form.estimatedCost || !form.justification.trim()) {
+      toast.error("Please fill all required fields.");
+      return;
+    }
+    setActing("create");
+    try {
+      const res = await fetch("/api/procurement/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, ...form, quantity: Number(form.quantity), submitNow }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? "Failed"); }
+      toast.success(submitNow ? "Request submitted to PI!" : "Draft saved.");
+      setShowForm(false);
+      setForm({ budgetHeadId: "", itemName: "", itemDescription: "", quantity: "1", estimatedCost: "", justification: "", sourcingType: "NON_GEM", vendorName: "", vendorAddress: "", vendorGst: "", quoteReference: "" });
+      await reload();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Error");
+    } finally { setActing(null); }
+  }
+
+  async function doAction(id: string, action: "approve" | "reject" | "submit", extra?: Record<string, unknown>) {
+    setActing(id + action);
+    try {
+      const res = await fetch(`/api/procurement/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? "Failed"); }
+      if (action === "approve") toast.success("Approved!");
+      if (action === "reject") { toast.success("Rejected."); setRejectTarget(null); setRejectReason(""); }
+      if (action === "submit") toast.success("Submitted to PI!");
+      await reload();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Error");
+    } finally { setActing(null); }
+  }
+
+  async function doDelete(id: string) {
+    setActing(id + "delete");
+    try {
+      const res = await fetch(`/api/procurement/requests/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      toast.success("Request deleted.");
+      setDeleteTarget(null);
+      await reload();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Error");
+    } finally { setActing(null); }
+  }
+
+  function downloadForm(id: string) {
+    window.open(`/api/procurement/requests/${id}/generate-form`, "_blank");
+  }
+
+  const inputStyle = {
+    width: "100%", padding: "8px 12px", border: "1.5px solid #E5E7EB",
+    borderRadius: 8, fontSize: 13, color: "#1A1A2E",
+    background: "white", boxSizing: "border-box" as const, outline: "none",
+  };
+  const labelStyle = {
+    fontSize: 11, fontWeight: 600 as const, color: "#6B7280",
+    textTransform: "uppercase" as const, letterSpacing: ".05em", display: "block" as const, marginBottom: 4,
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
+          {requests.length} request{requests.length !== 1 ? "s" : ""}
+        </span>
+        {canCreate && !showForm && (
+          <button onClick={() => setShowForm(true)} style={{
+            background: "#5B4FE9", color: "white", border: "none",
+            borderRadius: 8, padding: "8px 16px", fontSize: 13,
+            fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+          }}>+ New Purchase Request</button>
+        )}
+      </div>
+
+      {/* ── Create Form ── */}
+      {showForm && (
+        <div style={{ background: "#F9F8FF", border: "1.5px solid #C7D2FE", borderRadius: 14, padding: 20, marginBottom: 24 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#5B4FE9", marginBottom: 16 }}>New Procurement Request</div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Budget Head */}
+            <div>
+              <label style={labelStyle}>Budget Head *</label>
+              <select value={form.budgetHeadId} onChange={(e) => setF("budgetHeadId", e.target.value)} style={inputStyle}>
+                <option value="">Select budget head…</option>
+                {budgetHeads.map((bh) => (
+                  <option key={bh.id} value={bh.id}>
+                    {bh.name} ({bh.category === "NON_RECURRING" ? "Non-Recurring" : "Recurring"}) — ₹{bh.allocatedAmount.toLocaleString("en-IN")}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Item Name */}
+            <div>
+              <label style={labelStyle}>Item Name *</label>
+              <input value={form.itemName} onChange={(e) => setF("itemName", e.target.value)}
+                placeholder="e.g. Digital Oscilloscope" style={inputStyle} />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label style={labelStyle}>Description / Specification *</label>
+              <textarea value={form.itemDescription} onChange={(e) => setF("itemDescription", e.target.value)}
+                placeholder="Full technical specification…" rows={3}
+                style={{ ...inputStyle, resize: "vertical" }} />
+            </div>
+
+            {/* Qty + Cost */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Quantity *</label>
+                <input type="number" min={1} value={form.quantity} onChange={(e) => setF("quantity", e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Estimated Cost (₹) *</label>
+                <input type="number" min={0} value={form.estimatedCost} onChange={(e) => setF("estimatedCost", e.target.value)}
+                  placeholder="0.00" style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Justification */}
+            <div>
+              <label style={labelStyle}>Justification / Purpose *</label>
+              <textarea value={form.justification} onChange={(e) => setF("justification", e.target.value)}
+                placeholder="Scientific need and how this item will be used…" rows={3}
+                style={{ ...inputStyle, resize: "vertical" }} />
+            </div>
+
+            {/* Sourcing */}
+            <div>
+              <label style={labelStyle}>Sourcing Type</label>
+              <select value={form.sourcingType} onChange={(e) => setF("sourcingType", e.target.value)} style={inputStyle}>
+                <option value="GEM">GeM (Government e-Marketplace)</option>
+                <option value="NON_GEM">Non-GeM (Open Market)</option>
+                <option value="PROPRIETARY">Proprietary / Single Source</option>
+              </select>
+            </div>
+
+            {/* Vendor (optional) */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Vendor Name</label>
+                <input value={form.vendorName} onChange={(e) => setF("vendorName", e.target.value)}
+                  placeholder="Supplier name (optional)" style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Vendor GST</label>
+                <input value={form.vendorGst} onChange={(e) => setF("vendorGst", e.target.value)}
+                  placeholder="GST number (optional)" style={inputStyle} />
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Quote / Catalogue Reference</label>
+              <input value={form.quoteReference} onChange={(e) => setF("quoteReference", e.target.value)}
+                placeholder="Quote no. or catalogue ref. (optional)" style={inputStyle} />
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+            <button onClick={() => setShowForm(false)} style={{
+              padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB",
+              background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer",
+            }}>Cancel</button>
+            <button onClick={() => submitForm(false)} disabled={acting === "create"} style={{
+              padding: "8px 18px", borderRadius: 8, border: "1.5px solid #C7D2FE",
+              background: "white", fontSize: 13, fontWeight: 600, color: "#5B4FE9", cursor: "pointer",
+            }}>💾 Save Draft</button>
+            <button onClick={() => submitForm(true)} disabled={acting === "create"} style={{
+              padding: "8px 18px", borderRadius: 8, border: "none",
+              background: "#5B4FE9", fontSize: 13, fontWeight: 600, color: "white", cursor: "pointer",
+            }}>{acting === "create" ? "Submitting…" : "📤 Submit to PI"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Request List ── */}
+      {requests.length === 0 && !showForm ? (
+        <Empty message={canCreate ? "No procurement requests yet. Click 'New Purchase Request' to create one." : "No procurement requests for this project yet."} />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {requests.map((req) => {
+            const sc = PROCUREMENT_STATUS[req.status];
+            const isExpanded = expandedId === req.id;
+            const isOwner = req.submittedBy.id === currentUserId;
+
+            return (
+              <div key={req.id} style={{
+                background: "#fff", border: `1.5px solid ${sc.border}`,
+                borderRadius: 14, overflow: "hidden",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+              }}>
+                {/* ── Approved banner with download ── */}
+                {req.status === "APPROVED" && (
+                  <div style={{
+                    background: "linear-gradient(90deg,#E8F5E9,#F1F8E9)",
+                    borderBottom: "1.5px solid #A5D6A7",
+                    padding: "10px 16px",
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                  }}>
+                    <div style={{ fontSize: 13, color: "#2E7D32", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                      ✅ Approved by {req.approvedBy?.name ?? "PI"}
+                      {req.approvedAt && (
+                        <span style={{ fontWeight: 400, color: "#4CAF50", fontSize: 12 }}>
+                          · {fmt(req.approvedAt)}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => downloadForm(req.id)}
+                      style={{
+                        background: "#2E7D32", color: "white", border: "none",
+                        borderRadius: 8, padding: "7px 16px", fontSize: 13,
+                        fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      ⬇ Download ANRF Form
+                    </button>
+                  </div>
+                )}
+
+                {/* ── Rejected reason ── */}
+                {req.status === "REJECTED" && req.rejectionReason && (
+                  <div style={{
+                    background: "#FFF5F5", borderBottom: "1.5px solid #FFCDD2",
+                    padding: "10px 16px", fontSize: 13,
+                    color: "#C62828", display: "flex", gap: 8, alignItems: "flex-start",
+                  }}>
+                    <span>❌</span>
+                    <div>
+                      <span style={{ fontWeight: 600 }}>Rejected: </span>
+                      {req.rejectionReason}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Main row ── */}
+                <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1A2E" }}>{req.itemName}</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, padding: "2px 10px",
+                        borderRadius: 99, background: sc.bg, color: sc.color,
+                      }}>{sc.label}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9999AA", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <span>Qty: {req.quantity}</span>
+                      <span style={{ fontWeight: 600, color: "#1A1A2E" }}>
+                        ₹{req.estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                      <span>{req.budgetHead.headName}</span>
+                      <span>{req.sourcingType.replace(/_/g, " ")}</span>
+                      <span>By {req.submittedBy.name}</span>
+                    </div>
+                  </div>
+
+                  {/* ── PI actions ── */}
+                  {isPI && req.status === "SUBMITTED" && (
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button
+                        onClick={() => doAction(req.id, "approve")}
+                        disabled={!!acting}
+                        style={{
+                          background: "#E8F5E9", color: "#2E7D32", border: "1.5px solid #A5D6A7",
+                          borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                          fontWeight: 700, cursor: "pointer",
+                        }}
+                      >✓ Approve</button>
+                      <button
+                        onClick={() => { setRejectTarget(req.id); setRejectReason(""); }}
+                        disabled={!!acting}
+                        style={{
+                          background: "#FFEBEE", color: "#C62828", border: "1.5px solid #FFCDD2",
+                          borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                          fontWeight: 700, cursor: "pointer",
+                        }}
+                      >✗ Reject</button>
+                    </div>
+                  )}
+
+                  {/* ── PI delete ── */}
+                  {isPI && (
+                    <button
+                      onClick={() => setDeleteTarget(req.id)}
+                      style={{
+                        background: "#FFF0F0", color: "#C62828", border: "none",
+                        borderRadius: 8, padding: "6px 10px", fontSize: 12,
+                        fontWeight: 600, cursor: "pointer", flexShrink: 0,
+                      }}
+                    >🗑</button>
+                  )}
+
+                  {/* ── Owner: submit draft ── */}
+                  {isOwner && req.status === "DRAFT" && (
+                    <button
+                      onClick={() => doAction(req.id, "submit")}
+                      disabled={!!acting}
+                      style={{
+                        background: "#5B4FE9", color: "white", border: "none",
+                        borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                        fontWeight: 700, cursor: "pointer", flexShrink: 0,
+                      }}
+                    >📤 Submit</button>
+                  )}
+
+                  {/* ── Owner: resubmit after rejection ── */}
+                  {isOwner && req.status === "REJECTED" && (
+                    <button
+                      onClick={() => doAction(req.id, "submit")}
+                      disabled={!!acting}
+                      style={{
+                        background: "#5B4FE9", color: "white", border: "none",
+                        borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                        fontWeight: 700, cursor: "pointer", flexShrink: 0,
+                      }}
+                    >📤 Resubmit</button>
+                  )}
+
+                  {/* Expand toggle */}
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : req.id)}
+                    style={{
+                      background: "#F5F5F7", border: "none", borderRadius: 8,
+                      padding: "6px 10px", fontSize: 12, color: "#9999AA",
+                      cursor: "pointer", flexShrink: 0,
+                    }}
+                  >{isExpanded ? "▲" : "▼"}</button>
+                </div>
+
+                {/* ── Expanded details ── */}
+                {isExpanded && (
+                  <div style={{
+                    borderTop: "1px solid #EBEBF0", padding: "14px 16px",
+                    background: "#FAFAFE", display: "flex", flexDirection: "column", gap: 10,
+                    fontSize: 13, color: "#444",
+                  }}>
+                    <DetailRow label="Description" value={req.itemDescription} />
+                    <DetailRow label="Justification" value={req.justification} />
+                    {req.vendorName && <DetailRow label="Vendor" value={req.vendorName} />}
+                    {req.vendorGst && <DetailRow label="GST" value={req.vendorGst} />}
+                    {req.vendorAddress && <DetailRow label="Vendor Address" value={req.vendorAddress} />}
+                    {req.quoteReference && <DetailRow label="Quote Ref." value={req.quoteReference} />}
+                    <DetailRow label="Submitted on" value={fmt(req.createdAt)} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Reject Modal ── */}
+      {rejectTarget && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+        }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 420, maxWidth: "90vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#C62828", marginBottom: 6 }}>Reject Request</div>
+            <div style={{ fontSize: 13, color: "#9999AA", marginBottom: 14 }}>
+              The submitter will be notified and can edit and resubmit.
+            </div>
+            <label style={labelStyle}>Reason for Rejection *</label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Explain why this request is being rejected…"
+              rows={4}
+              style={{ ...inputStyle, marginTop: 4, resize: "vertical" }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button onClick={() => setRejectTarget(null)} style={{
+                padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB",
+                background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer",
+              }}>Cancel</button>
+              <button
+                onClick={() => doAction(rejectTarget, "reject", { rejectionReason: rejectReason })}
+                disabled={!rejectReason.trim() || !!acting}
+                style={{
+                  padding: "8px 18px", borderRadius: 8, border: "none",
+                  background: rejectReason.trim() ? "#C62828" : "#FFCDD2",
+                  fontSize: 13, fontWeight: 600, color: "white",
+                  cursor: rejectReason.trim() ? "pointer" : "not-allowed",
+                }}
+              >{acting ? "Rejecting…" : "Confirm Rejection"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ── */}
+      {deleteTarget && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+        }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 380, maxWidth: "90vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A2E", marginBottom: 8 }}>Delete Request?</div>
+            <div style={{ fontSize: 13, color: "#9999AA", marginBottom: 20, lineHeight: 1.6 }}>
+              <strong style={{ color: "#C62828" }}>Are you sure?</strong><br />
+              This action cannot be undone.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setDeleteTarget(null)} style={{
+                padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB",
+                background: "white", fontSize: 13, fontWeight: 600, color: "#6B7280", cursor: "pointer",
+              }}>Cancel</button>
+              <button onClick={() => doDelete(deleteTarget)} disabled={!!acting} style={{
+                padding: "8px 18px", borderRadius: 8, border: "none",
+                background: "#C62828", fontSize: 13, fontWeight: 600, color: "white", cursor: "pointer",
+              }}>{acting ? "Deleting…" : "Yes, Delete"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "#9999AA", textTransform: "uppercase", letterSpacing: ".05em", minWidth: 110, paddingTop: 1 }}>{label}</span>
+      <span style={{ flex: 1, color: "#1A1A2E", lineHeight: 1.5 }}>{value}</span>
     </div>
   );
 }
@@ -260,9 +707,13 @@ function AddBudgetHeadInline({
 export default function ProjectTabs({
   project,
   userRole,
+  procurementRequests = [],
+  currentUserId = "",
 }: {
   project: Project;
   userRole: string;
+  procurementRequests?: ProcurementRequest[];
+  currentUserId?: string;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
@@ -270,6 +721,8 @@ export default function ProjectTabs({
   const [reportLoading, setReportLoading] = useState(false);
 
   const perms = can(userRole);
+  // eslint-disable-next-line react-hooks/purity
+const now = useMemo(() => Date.now(), []);
 
   function refresh() { router.refresh(); }
 
@@ -280,13 +733,14 @@ export default function ProjectTabs({
     ? Math.min(100, Math.round((totalSpent / project.totalBudget) * 100)) : 0;
 
   const visibleTabs: Tab[] = perms.viewFinancials
-    ? ["overview", "milestones", "team", "financials", "documents", "messages"]
-    : ["overview", "milestones", "team", "documents", "messages"];
+    ? ["overview", "milestones", "team", "financials", "documents", "procurement", "messages"]
+    : ["overview", "milestones", "team", "documents", "procurement", "messages"];
 
   const counts: Partial<Record<Tab, number>> = {
     milestones: project.milestones.length,
     team: project.personnelRecords.length,
     documents: project.documents.length,
+    procurement: procurementRequests.length,
   };
 
   async function deleteMilestone(id: string) {
@@ -345,34 +799,21 @@ export default function ProjectTabs({
       const res = await fetch(`/api/projects/${project.id}/report`);
       if (!res.ok) {
         let message = "Failed to generate report";
-        try {
-          const data = await res.json();
-          if (data?.error) message = data.error;
-        } catch {
-          // response wasn't JSON; keep default message
-        }
-        toast.error(message);
-        return;
+        try { const data = await res.json(); if (data?.error) message = data.error; } catch { /* ignore */ }
+        toast.error(message); return;
       }
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const match = disposition.match(/filename="(.+?)"/);
       const filename = match?.[1] ?? `progress_report_${project.sanctionNumber}.pdf`;
-
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
       toast.success("Report downloaded");
-    } catch {
-      toast.error("Network error while generating report");
-    } finally {
-      setReportLoading(false);
-    }
+    } catch { toast.error("Network error while generating report"); }
+    finally { setReportLoading(false); }
   }
 
   return (
@@ -380,51 +821,36 @@ export default function ProjectTabs({
       {/* ── Header actions ── */}
       {perms.viewFinancials && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-          <button
-            onClick={downloadReport}
-            disabled={reportLoading}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "8px 16px", borderRadius: 8, border: "none",
-              background: reportLoading ? "#A5B4FC" : "#5B4FE9",
-              fontSize: 13, fontWeight: 600, color: "white",
-              cursor: reportLoading ? "default" : "pointer",
-            }}
-          >
+          <button onClick={downloadReport} disabled={reportLoading} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "8px 16px", borderRadius: 8, border: "none",
+            background: reportLoading ? "#A5B4FC" : "#5B4FE9",
+            fontSize: 13, fontWeight: 600, color: "white",
+            cursor: reportLoading ? "default" : "pointer",
+          }}>
             {reportLoading ? "Generating…" : "📄 Generate Report"}
           </button>
         </div>
       )}
 
       {/* ── Tab bar ── */}
-      <div style={{
-        display: "flex", gap: 4, borderBottom: "2px solid #EBEBF0",
-        marginBottom: 24, overflowX: "auto",
-      }}>
+      <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #EBEBF0", marginBottom: 24, overflowX: "auto" }}>
         {visibleTabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              padding: "10px 16px", fontSize: 13, fontWeight: 600,
-              border: "none", background: "none", cursor: "pointer",
-              whiteSpace: "nowrap",
-              color: tab === t ? "#5B4FE9" : "#9999AA",
-              borderBottom: tab === t ? "2px solid #5B4FE9" : "2px solid transparent",
-              marginBottom: -2, transition: "all .15s",
-              display: "flex", alignItems: "center", gap: 6,
-            }}
-          >
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: "10px 16px", fontSize: 13, fontWeight: 600,
+            border: "none", background: "none", cursor: "pointer", whiteSpace: "nowrap",
+            color: tab === t ? "#5B4FE9" : "#9999AA",
+            borderBottom: tab === t ? "2px solid #5B4FE9" : "2px solid transparent",
+            marginBottom: -2, transition: "all .15s",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
             {TAB_LABELS[t]}
             {counts[t] !== undefined && (
               <span style={{
                 background: tab === t ? "#EEF2FF" : "#F5F5F7",
                 color: tab === t ? "#5B4FE9" : "#9999AA",
-                fontSize: 11, fontWeight: 700,
-                padding: "1px 7px", borderRadius: 99,
-              }}>
-                {counts[t]}
-              </span>
+                fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 99,
+              }}>{counts[t]}</span>
             )}
           </button>
         ))}
@@ -434,11 +860,8 @@ export default function ProjectTabs({
       {tab === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {project.description && (
-            <Card>
-              <SectionLabel>About</SectionLabel>
-              <p style={{ fontSize: 14, color: "#444", lineHeight: 1.7, margin: 0 }}>
-                {project.description}
-              </p>
+            <Card><SectionLabel>About</SectionLabel>
+              <p style={{ fontSize: 14, color: "#444", lineHeight: 1.7, margin: 0 }}>{project.description}</p>
             </Card>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
@@ -455,21 +878,15 @@ export default function ProjectTabs({
                 border: `1px solid ${item.accent ? "#C7D2FE" : "#EBEBF0"}`,
                 borderRadius: 12, padding: "14px 16px",
               }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: item.accent ? "#5B4FE9" : "#9999AA", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
-                  {item.label}
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A2E", fontFamily: item.mono ? "monospace" : undefined }}>
-                  {item.value}
-                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: item.accent ? "#5B4FE9" : "#9999AA", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>{item.label}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A2E", fontFamily: item.mono ? "monospace" : undefined }}>{item.value}</div>
               </div>
             ))}
           </div>
           <Card>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <SectionLabel>Budget Utilisation</SectionLabel>
-              <span style={{ fontSize: 13, fontWeight: 700, color: budgetPct > 90 ? "#C62828" : "#1A1A2E" }}>
-                {budgetPct}%
-              </span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: budgetPct > 90 ? "#C62828" : "#1A1A2E" }}>{budgetPct}%</span>
             </div>
             <ProgressBar value={budgetPct} />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, color: "#9999AA" }}>
@@ -484,10 +901,7 @@ export default function ProjectTabs({
                 const count = project.milestones.filter((m) => m.status === s).length;
                 const cfg = MILESTONE_STATUS[s];
                 return (
-                  <div key={s} style={{
-                    background: cfg.bg, color: cfg.color,
-                    borderRadius: 10, padding: "10px 16px", textAlign: "center", minWidth: 80,
-                  }}>
+                  <div key={s} style={{ background: cfg.bg, color: cfg.color, borderRadius: 10, padding: "10px 16px", textAlign: "center", minWidth: 80 }}>
                     <div style={{ fontSize: 22, fontWeight: 800 }}>{count}</div>
                     <div style={{ fontSize: 11, fontWeight: 600 }}>{cfg.label}</div>
                   </div>
@@ -502,64 +916,31 @@ export default function ProjectTabs({
       {tab === "milestones" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
-              {project.milestones.length} milestone{project.milestones.length !== 1 ? "s" : ""}
-            </span>
-            {perms.addMilestone && (
-              <AddMilestoneForm projectId={project.id} onSuccess={refresh} />
-            )}
+            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>{project.milestones.length} milestone{project.milestones.length !== 1 ? "s" : ""}</span>
+            {perms.addMilestone && <AddMilestoneForm projectId={project.id} onSuccess={refresh} />}
           </div>
-          {project.milestones.length === 0 ? (
-            <Empty message="No milestones yet." />
-          ) : (
+          {project.milestones.length === 0 ? <Empty message="No milestones yet." /> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {project.milestones.map((m) => {
                 const cfg = MILESTONE_STATUS[m.status] ?? MILESTONE_STATUS.PENDING;
                 return (
-                  <div key={m.id} style={{
-                    background: "#fff", border: "1px solid #EBEBF0",
-                    borderLeft: `4px solid ${cfg.color}`,
-                    borderRadius: 12, padding: "14px 16px",
-                    display: "flex", gap: 12, alignItems: "flex-start",
-                  }}>
+                  <div key={m.id} style={{ background: "#fff", border: "1px solid #EBEBF0", borderLeft: `4px solid ${cfg.color}`, borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1A2E" }}>{m.title}</span>
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, padding: "2px 8px",
-                          borderRadius: 6, background: cfg.bg, color: cfg.color,
-                        }}>
-                          {cfg.label}
-                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
                       </div>
-                      {m.description && (
-                        <p style={{ fontSize: 12, color: "#9999AA", margin: "4px 0 0", lineHeight: 1.5 }}>
-                          {m.description}
-                        </p>
-                      )}
+                      {m.description && <p style={{ fontSize: 12, color: "#9999AA", margin: "4px 0 0", lineHeight: 1.5 }}>{m.description}</p>}
                       <p style={{ fontSize: 11, color: "#9999AA", margin: "6px 0 0" }}>
                         Due: {fmt(m.dueDate)}
-                        {m.completedAt && (
-                          <span style={{ color: "#2E7D32", marginLeft: 8 }}>
-                            · Completed {fmt(m.completedAt)}
-                          </span>
-                        )}
+                        {m.completedAt && <span style={{ color: "#2E7D32", marginLeft: 8 }}>· Completed {fmt(m.completedAt)}</span>}
                       </p>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                      {perms.updateMilestone && (
-                        <MilestoneStatusButton milestoneId={m.id} currentStatus={m.status} onSuccess={refresh} />
-                      )}
+                      {perms.updateMilestone && <MilestoneStatusButton milestoneId={m.id} currentStatus={m.status} onSuccess={refresh} />}
                       {perms.deleteMilestone && (
-                        <button
-                          onClick={() => deleteMilestone(m.id)}
-                          disabled={deletingId === m.id}
-                          style={{
-                            background: "#FFF0F0", border: "none", borderRadius: 8,
-                            color: "#C62828", fontSize: 12, fontWeight: 600,
-                            padding: "5px 10px", cursor: "pointer",
-                          }}
-                        >
+                        <button onClick={() => deleteMilestone(m.id)} disabled={deletingId === m.id}
+                          style={{ background: "#FFF0F0", border: "none", borderRadius: 8, color: "#C62828", fontSize: 12, fontWeight: 600, padding: "5px 10px", cursor: "pointer" }}>
                           {deletingId === m.id ? "…" : "Delete"}
                         </button>
                       )}
@@ -576,63 +957,28 @@ export default function ProjectTabs({
       {tab === "team" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
-              {project.personnelRecords.length} member{project.personnelRecords.length !== 1 ? "s" : ""}
-            </span>
-            {perms.addTeamMember && (
-              <AddTeamMemberForm projectId={project.id} onSuccess={refresh} />
-            )}
+            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>{project.personnelRecords.length} member{project.personnelRecords.length !== 1 ? "s" : ""}</span>
+            {perms.addTeamMember && <AddTeamMemberForm projectId={project.id} onSuccess={refresh} />}
           </div>
-          {project.personnelRecords.length === 0 ? (
-            <Empty message="No team members yet." />
-          ) : (
+          {project.personnelRecords.length === 0 ? <Empty message="No team members yet." /> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {project.personnelRecords.map((pr, i) => {
                 const color = AVATAR_COLORS[i % AVATAR_COLORS.length];
                 return (
-                  <div key={pr.id} style={{
-                    background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12,
-                    padding: "14px 16px", display: "flex", alignItems: "center", gap: 14,
-                  }}>
-                    <div style={{
-                      width: 42, height: 42, borderRadius: "50%",
-                      background: color, color: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 14, fontWeight: 700, flexShrink: 0,
-                    }}>
-                      {initials(pr.user.name)}
-                    </div>
+                  <div key={pr.id} style={{ background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: "50%", background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{initials(pr.user.name)}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: "#1A1A2E" }}>{pr.user.name}</div>
                       <div style={{ fontSize: 12, color: "#9999AA" }}>{pr.user.email}</div>
-                      {pr.joinDate && (
-                        <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>
-                          Joined {fmt(pr.joinDate)}
-                        </div>
-                      )}
+                      {pr.joinDate && <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>Joined {fmt(pr.joinDate)}</div>}
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{
-                        display: "inline-block", background: "#EEF2FF", color: "#5B4FE9",
-                        fontSize: 11, fontWeight: 600, padding: "3px 10px",
-                        borderRadius: 6, marginBottom: 4,
-                      }}>
-                        {ROLE_LABELS[pr.role] ?? pr.role}
-                      </div>
-                      {pr.stipend !== null && (
-                        <div style={{ fontSize: 11, color: "#9999AA" }}>{inr(pr.stipend)}/mo</div>
-                      )}
+                      <div style={{ display: "inline-block", background: "#EEF2FF", color: "#5B4FE9", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, marginBottom: 4 }}>{ROLE_LABELS[pr.role] ?? pr.role}</div>
+                      {pr.stipend !== null && <div style={{ fontSize: 11, color: "#9999AA" }}>{inr(pr.stipend)}/mo</div>}
                     </div>
                     {perms.removeTeamMember && (
-                      <button
-                        onClick={() => deletePersonnel(pr.id)}
-                        disabled={deletingId === pr.id}
-                        style={{
-                          background: "#FFF0F0", border: "none", borderRadius: 8,
-                          color: "#C62828", fontSize: 12, fontWeight: 600,
-                          padding: "5px 10px", cursor: "pointer", flexShrink: 0,
-                        }}
-                      >
+                      <button onClick={() => deletePersonnel(pr.id)} disabled={deletingId === pr.id}
+                        style={{ background: "#FFF0F0", border: "none", borderRadius: 8, color: "#C62828", fontSize: 12, fontWeight: 600, padding: "5px 10px", cursor: "pointer", flexShrink: 0 }}>
                         {deletingId === pr.id ? "…" : "Remove"}
                       </button>
                     )}
@@ -642,11 +988,7 @@ export default function ProjectTabs({
             </div>
           )}
           {userRole !== "PI" && (
-            <div style={{
-              marginTop: 16, padding: "12px 16px",
-              background: "#FFF8E1", borderRadius: 10,
-              fontSize: 12, color: "#F57F17",
-            }}>
+            <div style={{ marginTop: 16, padding: "12px 16px", background: "#FFF8E1", borderRadius: 10, fontSize: 12, color: "#F57F17" }}>
               ℹ️ Only the Principal Investigator can add or remove team members.
             </div>
           )}
@@ -656,77 +998,41 @@ export default function ProjectTabs({
       {/* ── Financials ── */}
       {tab === "financials" && perms.viewFinancials && (
         <div>
-          {/* ── UPDATED HEADER: FinanceToolbar + AddExpenditureForm side by side ── */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
-              Budget heads & expenditures
-            </span>
+            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>Budget heads & expenditures</span>
             {perms.addExpenditure && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <FinanceToolbar projectId={project.id} onImportSuccess={refresh} />
-                {project.budgetHeads.length > 0 && (
-                  <AddExpenditureForm
-                    projectId={project.id}
-                    budgetHeads={project.budgetHeads}
-                    onSuccess={refresh}
-                  />
-                )}
+                {project.budgetHeads.length > 0 && <AddExpenditureForm projectId={project.id} budgetHeads={project.budgetHeads} onSuccess={refresh} />}
               </div>
             )}
           </div>
-
           {!perms.addExpenditure && (
-            <div style={{
-              marginBottom: 16, padding: "10px 14px",
-              background: "#EEF2FF", borderRadius: 10,
-              fontSize: 12, color: "#5B4FE9",
-            }}>
+            <div style={{ marginBottom: 16, padding: "10px 14px", background: "#EEF2FF", borderRadius: 10, fontSize: 12, color: "#5B4FE9" }}>
               ℹ️ You can view financials but only the PI can add or delete expenditures.
             </div>
           )}
-
           {project.budgetHeads.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 16 }}>
               {project.budgetHeads.map((bh) => {
                 const spent = bh.expenditures.reduce((s, e) => s + e.amount, 0);
-                const pct = bh.allocatedAmount > 0
-                  ? Math.min(100, Math.round((spent / bh.allocatedAmount) * 100)) : 0;
+                const pct = bh.allocatedAmount > 0 ? Math.min(100, Math.round((spent / bh.allocatedAmount) * 100)) : 0;
                 const over = spent > bh.allocatedAmount;
                 return (
-                  <div key={bh.id} style={{
-                    background: "#fff", border: `1px solid ${over ? "#FFCDD2" : "#EBEBF0"}`,
-                    borderRadius: 12, overflow: "hidden",
-                  }}>
-                    <div style={{
-                      background: over ? "#FFF5F5" : "#FAFAFE",
-                      padding: "14px 16px", borderBottom: "1px solid #EBEBF0",
-                    }}>
+                  <div key={bh.id} style={{ background: "#fff", border: `1px solid ${over ? "#FFCDD2" : "#EBEBF0"}`, borderRadius: 12, overflow: "hidden" }}>
+                    <div style={{ background: over ? "#FFF5F5" : "#FAFAFE", padding: "14px 16px", borderBottom: "1px solid #EBEBF0" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1A2E" }}>{bh.name}</span>
-                          <span style={{
-                            fontSize: 11, fontWeight: 600,
-                            background: bh.category === "NON_RECURRING" ? "#F3E5F5" : "#E8F5E9",
-                            color: bh.category === "NON_RECURRING" ? "#7B1FA2" : "#2E7D32",
-                            padding: "2px 8px", borderRadius: 4,
-                          }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, background: bh.category === "NON_RECURRING" ? "#F3E5F5" : "#E8F5E9", color: bh.category === "NON_RECURRING" ? "#7B1FA2" : "#2E7D32", padding: "2px 8px", borderRadius: 4 }}>
                             {bh.category === "NON_RECURRING" ? "Non-Recurring" : "Recurring"}
                           </span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: over ? "#C62828" : "#1A1A2E" }}>
-                            {inr(spent)} / {inr(bh.allocatedAmount)}
-                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: over ? "#C62828" : "#1A1A2E" }}>{inr(spent)} / {inr(bh.allocatedAmount)}</span>
                           {perms.deleteBudgetHead && (
-                            <button
-                              onClick={() => deleteBudgetHead(bh.id)}
-                              disabled={deletingId === bh.id}
-                              style={{
-                                background: "#FFF0F0", border: "none", borderRadius: 6,
-                                color: "#C62828", fontSize: 11, fontWeight: 600,
-                                padding: "3px 8px", cursor: "pointer",
-                              }}
-                            >
+                            <button onClick={() => deleteBudgetHead(bh.id)} disabled={deletingId === bh.id}
+                              style={{ background: "#FFF0F0", border: "none", borderRadius: 6, color: "#C62828", fontSize: 11, fontWeight: 600, padding: "3px 8px", cursor: "pointer" }}>
                               {deletingId === bh.id ? "…" : "Delete"}
                             </button>
                           )}
@@ -736,48 +1042,23 @@ export default function ProjectTabs({
                       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: "#9999AA" }}>
                         <span>{pct}% used</span>
                         <span style={{ color: over ? "#C62828" : "#9999AA" }}>
-                          {over
-                            ? `₹${(spent - bh.allocatedAmount).toLocaleString("en-IN")} over budget`
-                            : `${inr(bh.allocatedAmount - spent)} remaining`}
+                          {over ? `₹${(spent - bh.allocatedAmount).toLocaleString("en-IN")} over budget` : `${inr(bh.allocatedAmount - spent)} remaining`}
                         </span>
                       </div>
                     </div>
                     {bh.expenditures.length > 0 ? (
                       <div style={{ padding: "0 16px" }}>
                         {bh.expenditures.map((exp, i) => (
-                          <div key={exp.id} style={{
-                            display: "flex", alignItems: "center", gap: 12,
-                            padding: "12px 0",
-                            borderBottom: i < bh.expenditures.length - 1 ? "1px solid #F5F5F7" : "none",
-                          }}>
-                            <div style={{
-                              width: 36, height: 36, borderRadius: 8,
-                              background: "#EEF2FF", flexShrink: 0,
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              fontSize: 16,
-                            }}>💸</div>
+                          <div key={exp.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < bh.expenditures.length - 1 ? "1px solid #F5F5F7" : "none" }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 8, background: "#EEF2FF", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💸</div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E" }}>
-                                {exp.description}
-                              </div>
-                              <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>
-                                {fmt(exp.date)}
-                                {exp.invoiceNumber && ` · ${exp.invoiceNumber}`}
-                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E" }}>{exp.description}</div>
+                              <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>{fmt(exp.date)}{exp.invoiceNumber && ` · ${exp.invoiceNumber}`}</div>
                             </div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A2E", flexShrink: 0 }}>
-                              {inr(exp.amount)}
-                            </div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A2E", flexShrink: 0 }}>{inr(exp.amount)}</div>
                             {perms.deleteExpenditure && (
-                              <button
-                                onClick={() => deleteExpenditure(exp.id)}
-                                disabled={deletingId === exp.id}
-                                style={{
-                                  background: "#FFF0F0", border: "none", borderRadius: 6,
-                                  color: "#C62828", fontSize: 11, fontWeight: 600,
-                                  padding: "4px 8px", cursor: "pointer", flexShrink: 0,
-                                }}
-                              >
+                              <button onClick={() => deleteExpenditure(exp.id)} disabled={deletingId === exp.id}
+                                style={{ background: "#FFF0F0", border: "none", borderRadius: 6, color: "#C62828", fontSize: 11, fontWeight: 600, padding: "4px 8px", cursor: "pointer", flexShrink: 0 }}>
                                 {deletingId === exp.id ? "…" : "Delete"}
                               </button>
                             )}
@@ -785,37 +1066,21 @@ export default function ProjectTabs({
                         ))}
                       </div>
                     ) : (
-                      <p style={{ fontSize: 12, color: "#9999AA", padding: "12px 16px", margin: 0 }}>
-                        No expenditures recorded yet.
-                      </p>
+                      <p style={{ fontSize: 12, color: "#9999AA", padding: "12px 16px", margin: 0 }}>No expenditures recorded yet.</p>
                     )}
                   </div>
                 );
               })}
             </div>
           )}
-
-          {perms.addBudgetHead && (
-            <AddBudgetHeadInline projectId={project.id} onSuccess={refresh} />
-          )}
-
-          {project.budgetHeads.length === 0 && !perms.addBudgetHead && (
-            <Empty message="No budget heads defined for this project yet." />
-          )}
-
+          {perms.addBudgetHead && <AddBudgetHeadInline projectId={project.id} onSuccess={refresh} />}
+          {project.budgetHeads.length === 0 && !perms.addBudgetHead && <Empty message="No budget heads defined for this project yet." />}
           {project.budgetHeads.length > 0 && (
-            <div style={{
-              marginTop: 16, background: "linear-gradient(135deg, #5B4FE9, #7C6FF7)",
-              borderRadius: 12, padding: "16px 20px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              color: "#fff",
-            }}>
+            <div style={{ marginTop: 16, background: "linear-gradient(135deg, #5B4FE9, #7C6FF7)", borderRadius: 12, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", color: "#fff" }}>
               <span style={{ fontSize: 13, opacity: .85 }}>Total Spent</span>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 20, fontWeight: 800 }}>{inr(totalSpent)}</div>
-                <div style={{ fontSize: 11, opacity: .75 }}>
-                  of {inr(project.totalBudget)} · {budgetPct}% used
-                </div>
+                <div style={{ fontSize: 11, opacity: .75 }}>of {inr(project.totalBudget)} · {budgetPct}% used</div>
               </div>
             </div>
           )}
@@ -826,86 +1091,36 @@ export default function ProjectTabs({
       {tab === "documents" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>
-              {project.documents.length} document{project.documents.length !== 1 ? "s" : ""}
-            </span>
-            {perms.uploadDocument && (
-              <UploadDocumentForm projectId={project.id} onSuccess={refresh} />
-            )}
+            <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>{project.documents.length} document{project.documents.length !== 1 ? "s" : ""}</span>
+            {perms.uploadDocument && <UploadDocumentForm projectId={project.id} onSuccess={refresh} />}
           </div>
-
-          {project.documents.length === 0 ? (
-            <Empty message="No documents uploaded yet." />
-          ) : (
+          {project.documents.length === 0 ? <Empty message="No documents uploaded yet." /> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {project.documents.map((doc) => {
                 let expiryBadge: React.ReactNode = null;
-
                 if (doc.expiryDate) {
                   const expiryTime = new Date(doc.expiryDate).getTime();
-                  // eslint-disable-next-line react-hooks/purity -- display-only "days left" calc; staleness across renders is acceptable here
-                  const now = Date.now();
                   const daysLeft = Math.ceil((expiryTime - now) / (1000 * 60 * 60 * 24));
                   const expired = daysLeft < 0;
                   const urgent = !expired && daysLeft <= 30;
-
                   expiryBadge = (
-                    <span style={{
-                      marginLeft: 8, fontSize: 10, fontWeight: 700,
-                      padding: "2px 7px", borderRadius: 4,
-                      background: expired ? "#FFEBEE" : urgent ? "#FFF8E1" : "#E8F5E9",
-                      color:      expired ? "#C62828" : urgent ? "#F57F17" : "#2E7D32",
-                    }}>
-                      {expired
-                        ? `Expired ${Math.abs(daysLeft)}d ago`
-                        : daysLeft === 0
-                        ? "Expires today"
-                        : `Expires in ${daysLeft}d`}
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: expired ? "#FFEBEE" : urgent ? "#FFF8E1" : "#E8F5E9", color: expired ? "#C62828" : urgent ? "#F57F17" : "#2E7D32" }}>
+                      {expired ? `Expired ${Math.abs(daysLeft)}d ago` : daysLeft === 0 ? "Expires today" : `Expires in ${daysLeft}d`}
                     </span>
                   );
                 }
-
                 return (
-                  <div key={doc.id} style={{
-                    background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12,
-                    padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
-                  }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: 8, background: "#EEF2FF",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 18, flexShrink: 0,
-                    }}>📋</div>
+                  <div key={doc.id} style={{ background: "#fff", border: "1px solid #EBEBF0", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, background: "#EEF2FF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📋</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {doc.name}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>
-                        {doc.type} · {fmt(doc.uploadedAt)}
-                        {expiryBadge}
-                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A2E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.name}</div>
+                      <div style={{ fontSize: 11, color: "#9999AA", marginTop: 2 }}>{doc.type} · {fmt(doc.uploadedAt)}{expiryBadge}</div>
                     </div>
-                    <a
-                      href={doc.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        background: "#EEF2FF", color: "#5B4FE9", fontSize: 12,
-                        fontWeight: 600, padding: "5px 12px", borderRadius: 7,
-                        textDecoration: "none", flexShrink: 0,
-                      }}
-                    >
-                      View →
-                    </a>
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                      style={{ background: "#EEF2FF", color: "#5B4FE9", fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 7, textDecoration: "none", flexShrink: 0 }}>View →</a>
                     {perms.deleteDocument && (
-                      <button
-                        onClick={() => deleteDocument(doc.id)}
-                        disabled={deletingId === doc.id}
-                        style={{
-                          background: "#FFF0F0", border: "none", borderRadius: 7,
-                          color: "#C62828", fontSize: 12, fontWeight: 600,
-                          padding: "5px 10px", cursor: "pointer", flexShrink: 0,
-                        }}
-                      >
+                      <button onClick={() => deleteDocument(doc.id)} disabled={deletingId === doc.id}
+                        style={{ background: "#FFF0F0", border: "none", borderRadius: 7, color: "#C62828", fontSize: 12, fontWeight: 600, padding: "5px 10px", cursor: "pointer", flexShrink: 0 }}>
                         {deletingId === doc.id ? "…" : "Delete"}
                       </button>
                     )}
@@ -917,10 +1132,19 @@ export default function ProjectTabs({
         </div>
       )}
 
-      {/* ── Messages ── */}
-      {tab === "messages" && (
-        <MessagingTab projectId={project.id} />
+      {/* ── Procurement ── */}
+      {tab === "procurement" && (
+        <ProcurementTab
+          project={{ id: project.id, title: project.title }}
+          budgetHeads={project.budgetHeads}
+          userRole={userRole}
+          currentUserId={currentUserId}
+          initialRequests={procurementRequests}
+        />
       )}
+
+      {/* ── Messages ── */}
+      {tab === "messages" && <MessagingTab projectId={project.id} />}
     </div>
   );
 }
@@ -928,45 +1152,18 @@ export default function ProjectTabs({
 // ─── Micro components ─────────────────────────────────────────────────────────
 
 function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ background: "#FAFAFE", border: "1px solid #EBEBF0", borderRadius: 12, padding: "16px 18px" }}>
-      {children}
-    </div>
-  );
+  return <div style={{ background: "#FAFAFE", border: "1px solid #EBEBF0", borderRadius: 12, padding: "16px 18px" }}>{children}</div>;
 }
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: 11, fontWeight: 700, color: "#9999AA", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 10 }}>
-      {children}
-    </div>
-  );
+  return <div style={{ fontSize: 11, fontWeight: 700, color: "#9999AA", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 10 }}>{children}</div>;
 }
-
 function ProgressBar({ value, danger = false }: { value: number; danger?: boolean }) {
   return (
     <div style={{ height: 6, borderRadius: 99, background: "#EBEBF0", overflow: "hidden" }}>
-      <div style={{
-        height: "100%", width: `${value}%`, borderRadius: 99,
-        background: danger
-          ? "linear-gradient(90deg,#EF5350,#E53935)"
-          : value > 80
-          ? "linear-gradient(90deg,#FFA726,#FB8C00)"
-          : "linear-gradient(90deg,#5B4FE9,#7C6FF7)",
-        transition: "width .4s ease",
-      }} />
+      <div style={{ height: "100%", width: `${value}%`, borderRadius: 99, background: danger ? "linear-gradient(90deg,#EF5350,#E53935)" : value > 80 ? "linear-gradient(90deg,#FFA726,#FB8C00)" : "linear-gradient(90deg,#5B4FE9,#7C6FF7)", transition: "width .4s ease" }} />
     </div>
   );
 }
-
 function Empty({ message }: { message: string }) {
-  return (
-    <div style={{
-      border: "2px dashed #EBEBF0", borderRadius: 12,
-      padding: "40px 24px", textAlign: "center",
-      color: "#9999AA", fontSize: 13,
-    }}>
-      {message}
-    </div>
-  );
+  return <div style={{ border: "2px dashed #EBEBF0", borderRadius: 12, padding: "40px 24px", textAlign: "center", color: "#9999AA", fontSize: 13 }}>{message}</div>;
 }

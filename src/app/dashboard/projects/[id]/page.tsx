@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import ProjectTabs from "@/components/projects/ProjectTabs";
 
+
 export default async function ProjectDetailPage({
   params,
 }: {
@@ -42,6 +43,54 @@ export default async function ProjectDetailPage({
   });
 
   if (!raw) redirect("/dashboard/projects");
+
+  // Purchase requests for the Procurement tab
+  // goodsReceipt and paymentReleaseRequest are one-to-one (singular) per schema
+  
+// ── STEP 1: fetch ─────────────────────────────────────────────────────────────
+const procurementRequests = await prisma.procurementRequest.findMany({
+  where: { projectId: id },
+  include: {
+    budgetHead:  { select: { id: true, headName: true, category: true } },
+    submittedBy: { select: { id: true, name: true, role: true } },
+    approvedBy:  { select: { id: true, name: true } },
+  },
+  orderBy: { createdAt: "desc" },
+});
+ 
+// ── STEP 2: serialize (Decimal → number, Date → ISO string) ───────────────────
+const serializedProcurementRequests = procurementRequests.map((r) => ({
+  id:              r.id,
+  itemName:        r.itemName,
+  itemDescription: r.itemDescription,
+  quantity:        r.quantity,
+  estimatedCost:   Number(r.estimatedCost),
+  justification:   r.justification,
+  sourcingType: r.sourcingType as string,
+  vendorName:      r.vendorName      ?? null,
+  vendorAddress:   r.vendorAddress   ?? null,
+  vendorGst:       r.vendorGst       ?? null,
+  quoteReference:  r.quoteReference  ?? null,
+  status: (["DRAFT","SUBMITTED","APPROVED","REJECTED"].includes(r.status)
+  ? r.status
+  : "DRAFT") as "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED",
+  rejectionReason: r.rejectionReason ?? null,
+  approvedAt:      r.approvedAt ? r.approvedAt.toISOString() : null,
+  createdAt:       r.createdAt.toISOString(),
+  submittedBy: {
+    id:   r.submittedBy.id,
+    name: r.submittedBy.name,
+    role: r.submittedBy.role,
+  },
+  approvedBy: r.approvedBy
+    ? { id: r.approvedBy.id, name: r.approvedBy.name }
+    : null,
+  budgetHead: {
+    id:       r.budgetHead.id,
+    headName: r.budgetHead.headName,
+    category: r.budgetHead.category,
+  },
+}));
 
   // Determine effective role for this project
   // If user is the PI → role is PI
@@ -99,13 +148,13 @@ export default async function ProjectDetailPage({
       user: { id: r.user.id, name: r.user.name, email: r.user.email },
     })),
     documents: raw.documents.map((d) => ({
-  id: d.id,
-  name: d.title,
-  type: d.documentType as string,
-  url: d.fileUrl,
-  uploadedAt: d.createdAt.toISOString(),
-  expiryDate: d.expiryDate ? d.expiryDate.toISOString() : null,  // add this line
-})),
+      id: d.id,
+      name: d.title,
+      type: d.documentType as string,
+      url: d.fileUrl,
+      uploadedAt: d.createdAt.toISOString(),
+      expiryDate: d.expiryDate ? d.expiryDate.toISOString() : null,
+    })),
   };
 
   function statusBadgeStyle(status: string) {
@@ -182,7 +231,12 @@ export default async function ProjectDetailPage({
         </div>
 
         <div className="bg-white rounded-2xl border border-[#EBEBF0] p-6 shadow-sm">
-          <ProjectTabs project={project} userRole={userRole} />
+          <ProjectTabs
+            project={project}
+            userRole={userRole}
+            procurementRequests={serializedProcurementRequests}
+            currentUserId={session.user.id!}
+          />
         </div>
       </div>
     </div>
