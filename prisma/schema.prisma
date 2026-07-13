@@ -68,8 +68,7 @@ model User {
   notifications     Notification[]
   messages          Message[]         @relation("UserMessages")
   anrfTemplates  AnrfTemplate[]
- 
-
+  
   @@map("users")
 }
 
@@ -96,6 +95,7 @@ model Project {
   personnelRecords PersonnelRecord[]
   expenditures     Expenditure[]
   threads          Thread[]
+  pdfTemplates     PdfTemplate[]
 
   @@index([piId])
   @@index([status])
@@ -164,7 +164,6 @@ model Document {
   fileUrl      String
   fileSize     Int?
   mimeType     String?
-  expiryDate   DateTime?
   createdAt    DateTime     @default(now())
 
   project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -238,7 +237,6 @@ model Message {
   replies     Message[]   @relation("MessageReplies")
   isRead      Boolean     @default(false)
   createdAt   DateTime    @default(now())
-  attachments MessageAttachment[]
 }
 
 model AnrfTemplate {
@@ -257,16 +255,36 @@ model AnrfTemplate {
   @@map("anrf_templates")
 }
 
-model MessageAttachment {
-  id        String   @id @default(cuid())
-  messageId String
-  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  fileName  String
-  fileUrl   String
-  fileSize  Int?
-  mimeType  String?
-  createdAt DateTime @default(now())
+model PdfTemplate {
+  id         String          @id @default(cuid())
+  projectId  String
+  name       String
+  filePath   String
+  fileSize   Int?
+  pageCount  Int             @default(1)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
-  @@index([messageId])
-  @@map("message_attachments")
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fields     TemplateField[]
+
+  @@index([projectId])
+  @@map("pdf_templates")
+}
+
+model TemplateField {
+  id          String      @id @default(cuid())
+  templateId  String
+  fieldName   String
+  page        Int         @default(1)
+  x           Float
+  y           Float
+  width       Float       @default(150)
+  fontSize    Int         @default(9)
+  createdAt   DateTime    @default(now())
+
+  template    PdfTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("template_fields")
 }
