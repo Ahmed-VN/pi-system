@@ -10,7 +10,7 @@ import AddExpenditureForm from "./AddExpenditureForm";
 import FinanceToolbar from "./FinanceToolbar";
 import UploadDocumentForm from "./UploadDocumentForm";
 import MessagingTab from './MessagingTab';
-
+import BankStatementsSection from "./BankStatementsSection";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface User { id: string; name: string; email: string; role?: string; }
@@ -1002,7 +1002,11 @@ const now = useMemo(() => Date.now(), []);
             <span style={{ fontSize: 13, color: "#9999AA", fontWeight: 500 }}>Budget heads & expenditures</span>
             {perms.addExpenditure && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <FinanceToolbar projectId={project.id} onImportSuccess={refresh} />
+                <FinanceToolbar
+  projectId={project.id}
+  projectStartDate={project.startDate}
+  projectEndDate={project.endDate}
+  onImportSuccess={refresh} />
                 {project.budgetHeads.length > 0 && <AddExpenditureForm projectId={project.id} budgetHeads={project.budgetHeads} onSuccess={refresh} />}
               </div>
             )}
@@ -1084,6 +1088,10 @@ const now = useMemo(() => Date.now(), []);
               </div>
             </div>
           )}
+
+          <div style={{ marginTop: 24 }}>
+            <BankStatementsSection projectId={project.id} />
+          </div>
         </div>
       )}
 

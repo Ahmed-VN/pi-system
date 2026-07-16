@@ -1,5 +1,7 @@
 import type { NextConfig } from 'next'
+
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['pdf-parse', 'pdfjs-dist'],
   allowedDevOrigins: ['172.16.36.49', 'localhost', '127.0.0.1'],
   experimental: {
     workerThreads: false,
@@ -13,4 +15,5 @@ const nextConfig: NextConfig = {
     ]
   },
 }
+
 export default nextConfig

@@ -5,6 +5,15 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,9 +62,24 @@ const PdfIcon = () => (
   </svg>
 );
 
+const WordIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M8 13l1.5 5L11 14l1.5 4L14 13" />
+  </svg>
+);
+
 const ChevronDown = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
   </svg>
 );
 
@@ -84,15 +108,41 @@ interface ImportResult {
 
 interface Props {
   projectId: string;
+  projectStartDate?: string;
+  projectEndDate?: string;
   onImportSuccess: () => void;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// Generates ANRF-style financial years (Apr–Mar) spanning the project duration.
+function generateFinancialYears(startDate?: string, endDate?: string): string[] {
+  if (!startDate || !endDate) {
+    // Fallback: current FY only, so the dropdown is never empty
+    const now = new Date();
+    const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    return [`${fyStart}-${fyStart + 1}`];
+  }
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  let fyStartYear = start.getMonth() >= 3 ? start.getFullYear() : start.getFullYear() - 1;
+  const fyEndYear = end.getMonth() >= 3 ? end.getFullYear() : end.getFullYear() - 1;
+  const years: string[] = [];
+  while (fyStartYear <= fyEndYear) {
+    years.push(`${fyStartYear}-${fyStartYear + 1}`);
+    fyStartYear++;
+  }
+  return years;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
-export default function FinanceToolbar({ projectId, onImportSuccess }: Props) {
+export default function FinanceToolbar({ projectId, projectStartDate, projectEndDate, onImportSuccess }: Props) {
+  const financialYears = generateFinancialYears(projectStartDate, projectEndDate);
+
   // Export state
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportingStatement, setExportingStatement] = useState(false);
   const [exportingUC, setExportingUC] = useState(false);
+  const [generatingUCDocx, setGeneratingUCDocx] = useState(false);
 
   // Import state
   const [importOpen, setImportOpen] = useState(false);
@@ -100,6 +150,36 @@ export default function FinanceToolbar({ projectId, onImportSuccess }: Props) {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Grant release state
+  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [releaseSubmitting, setReleaseSubmitting] = useState(false);
+  const [releaseForm, setReleaseForm] = useState({
+    sanctionNo: "",
+    sanctionDate: "",
+    amount: "",
+    recurringAmount: "", nonRecurringAmount: "",
+    financialYear: financialYears[0] ?? "",
+    remarks: "",
+  });
+
+  // UC generation state
+  const [ucOpen, setUcOpen] = useState(false);
+  const [ucForm, setUcForm] = useState({
+    fy: financialYears[0] ?? "",
+    fundType: "RECURRING" as "RECURRING" | "NON_RECURRING",
+    ucStatus: "Provisional",
+    interestEarned: "0",
+    interestDeposited: "0",
+    cfoName: "",
+    headOrgName: "",
+    certPlace: "",
+  });
+
+  // SOE generation state
+  const [soeOpen, setSoeOpen] = useState(false);
+  const [soeFy, setSoeFy] = useState(financialYears[0] ?? "");
+  const [generatingSOE, setGeneratingSOE] = useState(false);
 
   // ── Export helpers ──────────────────────────────────────────────────────────
   async function triggerDownload(url: string, setLoading: (v: boolean) => void, label: string) {
@@ -211,10 +291,132 @@ export default function FinanceToolbar({ projectId, onImportSuccess }: Props) {
     }
   }
 
-  const anyExporting = exportingExcel || exportingStatement || exportingUC;
+  // ── Grant release ─────────────────────────────────────────────────────────────
+  function handleReleaseOpenChange(open: boolean) {
+    setReleaseOpen(open);
+    if (!open) {
+      setReleaseForm({
+        sanctionNo: "",
+        sanctionDate: "",
+        amount: "",
+        recurringAmount: "",
+        nonRecurringAmount: "",
+        financialYear: financialYears[0] ?? "",
+        remarks: "",
+      });
+    }
+  }
+
+  async function handleLogRelease() {
+    if (!releaseForm.sanctionNo || !releaseForm.sanctionDate || !releaseForm.amount) {
+      toast.error("Sanction no., date, and amount are required");
+      return;
+    }
+    setReleaseSubmitting(true);
+    try {
+      const res = await fetch("/api/finance/grant-releases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          sanctionNo: releaseForm.sanctionNo,
+          sanctionDate: releaseForm.sanctionDate,
+          amount: Number(releaseForm.amount),
+          recurringAmount: Number(releaseForm.recurringAmount) || undefined,
+          nonRecurringAmount: Number(releaseForm.nonRecurringAmount) || undefined,
+          financialYear: releaseForm.financialYear,
+          remarks: releaseForm.remarks || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error ?? "Failed to log grant release");
+        return;
+      }
+      toast.success("Grant release logged");
+      handleReleaseOpenChange(false);
+      onImportSuccess(); // reuse the same "refresh financials" callback
+    } catch {
+      toast.error("Network error — please try again");
+    } finally {
+      setReleaseSubmitting(false);
+    }
+  }
+
+  // ── UC docx generation ───────────────────────────────────────────────────────
+  async function handleGenerateUCDocx() {
+    if (!ucForm.cfoName || !ucForm.headOrgName || !ucForm.certPlace) {
+      toast.error("CFO name, Head of Organisation, and Place are required");
+      return;
+    }
+    setGeneratingUCDocx(true);
+    try {
+      const params = new URLSearchParams({
+        projectId,
+        fy: ucForm.fy,
+        fundType: ucForm.fundType,
+        ucStatus: ucForm.ucStatus,
+        interestEarned: ucForm.interestEarned || "0",
+        interestDeposited: ucForm.interestDeposited || "0",
+        cfoName: ucForm.cfoName,
+        headOrgName: ucForm.headOrgName,
+        certPlace: ucForm.certPlace,
+      });
+      const res = await fetch(`/api/finance/export/uc-docx?${params.toString()}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (err.blockers?.length) {
+          toast.error(`Cannot generate: ${err.blockers[0]}`, {
+            description: err.blockers.length > 1 ? `+${err.blockers.length - 1} more issue(s) — check console` : undefined,
+          });
+          console.error("UC generation blockers:", err.blockers);
+        } else {
+          toast.error(err.error ?? "Failed to generate UC");
+        }
+        return;
+      }
+      await triggerDownload(
+        `/api/finance/export/uc-docx?${params.toString()}`,
+        setGeneratingUCDocx,
+        "Utilization Certificate (Word)"
+      );
+      setUcOpen(false);
+    } finally {
+      setGeneratingUCDocx(false);
+    }
+  }
+
+  // ── SOE docx generation ──────────────────────────────────────────────────────
+  async function handleGenerateSOE() {
+    setGeneratingSOE(true);
+    try {
+      const params = new URLSearchParams({ projectId, fy: soeFy });
+      await triggerDownload(
+        `/api/finance/export/soe-docx?${params.toString()}`,
+        setGeneratingSOE,
+        "Statement of Expenditure"
+      );
+      setSoeOpen(false);
+    } finally {
+      setGeneratingSOE(false);
+    }
+  }
+
+  const anyExporting = exportingExcel || exportingStatement || exportingUC || generatingUCDocx;
 
   return (
     <div className="flex items-center gap-2">
+      {/* ── LOG GRANT RELEASE BUTTON ── */}
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        onClick={() => setReleaseOpen(true)}
+      >
+        <PlusIcon />
+        Log Grant Release
+      </Button>
+
       {/* ── IMPORT BUTTON ── */}
       <Button
         size="sm"
@@ -240,7 +442,7 @@ export default function FinanceToolbar({ projectId, onImportSuccess }: Props) {
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuLabel className="text-xs text-muted-foreground">Export As</DropdownMenuLabel>
           <DropdownMenuSeparator />
 
@@ -274,8 +476,274 @@ export default function FinanceToolbar({ projectId, onImportSuccess }: Props) {
             <PdfIcon />
             <span>Utilization Certificate</span>
           </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs text-muted-foreground">Word (Auto-fill)</DropdownMenuLabel>
+
+          <DropdownMenuItem
+            className="gap-2 cursor-pointer"
+            onClick={() => setUcOpen(true)}
+            disabled={generatingUCDocx}
+          >
+            <WordIcon />
+            <span>Utilization Certificate (GFR 12-A)</span>
+            <span className="ml-auto text-xs text-muted-foreground">.docx</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            className="gap-2 cursor-pointer"
+            onClick={() => setSoeOpen(true)}
+            disabled={generatingSOE}
+          >
+            <WordIcon />
+            <span>Statement of Expenditure (SOE)</span>
+            <span className="ml-auto text-xs text-muted-foreground">.docx</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* ── GRANT RELEASE DIALOG ── */}
+      <Dialog open={releaseOpen} onOpenChange={handleReleaseOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Log Grant Release</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="sanctionNo">Sanction No.</Label>
+              <Input
+                id="sanctionNo"
+                placeholder="e.g. ANRF/ARG/2025/001234"
+                value={releaseForm.sanctionNo}
+                onChange={(e) => setReleaseForm((f) => ({ ...f, sanctionNo: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="sanctionDate">Sanction Date</Label>
+                <Input
+                  id="sanctionDate"
+                  type="date"
+                  value={releaseForm.sanctionDate}
+                  onChange={(e) => setReleaseForm((f) => ({ ...f, sanctionDate: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="amount">Amount (₹)</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={releaseForm.amount}
+                  onChange={(e) => setReleaseForm((f) => ({ ...f, amount: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="recurringAmount">Recurring Amount (₹)</Label>
+                <Input id="recurringAmount" type="number" value={releaseForm.recurringAmount}
+                  onChange={(e) => setReleaseForm((f) => ({ ...f, recurringAmount: e.target.value }))} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="nonRecurringAmount">Non-Recurring Amount (₹)</Label>
+                <Input id="nonRecurringAmount" type="number" value={releaseForm.nonRecurringAmount}
+                  onChange={(e) => setReleaseForm((f) => ({ ...f, nonRecurringAmount: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="financialYear">Financial Year</Label>
+              <Select
+                value={releaseForm.financialYear}
+                onValueChange={(v) => setReleaseForm((f) => ({ ...f, financialYear: v }))}
+              >
+                <SelectTrigger id="financialYear">
+                  <SelectValue placeholder="Select financial year" />
+                </SelectTrigger>
+                <SelectContent>
+                  {financialYears.map((fy) => (
+                    <SelectItem key={fy} value={fy}>{fy}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="remarks">Remarks (optional)</Label>
+              <Input
+                id="remarks"
+                placeholder="e.g. 2nd tranche release"
+                value={releaseForm.remarks}
+                onChange={(e) => setReleaseForm((f) => ({ ...f, remarks: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" disabled={releaseSubmitting}>Cancel</Button>
+            </DialogClose>
+            <Button onClick={handleLogRelease} disabled={releaseSubmitting}>
+              {releaseSubmitting ? "Saving…" : "Log Release"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── UC GENERATION DIALOG ── */}
+      <Dialog open={ucOpen} onOpenChange={setUcOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Generate Utilization Certificate</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="ucFy">Financial Year</Label>
+                <Select
+                  value={ucForm.fy}
+                  onValueChange={(v) => setUcForm((f) => ({ ...f, fy: v }))}
+                >
+                  <SelectTrigger id="ucFy">
+                    <SelectValue placeholder="Select year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {financialYears.map((fy) => (
+                      <SelectItem key={fy} value={fy}>{fy}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ucStatus">UC Status</Label>
+                <Select
+                  value={ucForm.ucStatus}
+                  onValueChange={(v) => setUcForm((f) => ({ ...f, ucStatus: v }))}
+                >
+                  <SelectTrigger id="ucStatus">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Provisional">Provisional</SelectItem>
+                    <SelectItem value="Audited">Audited</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="fundType">Fund Type</Label>
+              <Select
+                value={ucForm.fundType}
+                onValueChange={(v) => setUcForm((f) => ({ ...f, fundType: v as "RECURRING" | "NON_RECURRING" }))}
+              >
+                <SelectTrigger id="fundType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="RECURRING">Recurring</SelectItem>
+                  <SelectItem value="NON_RECURRING">Non-Recurring</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="interestEarned">Interest Earned (₹)</Label>
+                <Input
+                  id="interestEarned"
+                  type="number"
+                  value={ucForm.interestEarned}
+                  onChange={(e) => setUcForm((f) => ({ ...f, interestEarned: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="interestDeposited">Interest Deposited (₹)</Label>
+                <Input
+                  id="interestDeposited"
+                  type="number"
+                  value={ucForm.interestDeposited}
+                  onChange={(e) => setUcForm((f) => ({ ...f, interestDeposited: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="cfoName">Chief Finance Officer Name</Label>
+              <Input
+                id="cfoName"
+                placeholder="Name of CFO / Head of Finance"
+                value={ucForm.cfoName}
+                onChange={(e) => setUcForm((f) => ({ ...f, cfoName: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="headOrgName">Head of Organisation Name</Label>
+              <Input
+                id="headOrgName"
+                placeholder="Name of Head of Organisation"
+                value={ucForm.headOrgName}
+                onChange={(e) => setUcForm((f) => ({ ...f, headOrgName: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="certPlace">Place</Label>
+              <Input
+                id="certPlace"
+                placeholder="e.g. Calicut"
+                value={ucForm.certPlace}
+                onChange={(e) => setUcForm((f) => ({ ...f, certPlace: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" disabled={generatingUCDocx}>Cancel</Button>
+            </DialogClose>
+            <Button onClick={handleGenerateUCDocx} disabled={generatingUCDocx}>
+              {generatingUCDocx ? "Generating…" : "Generate & Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── SOE GENERATION DIALOG ── */}
+      <Dialog open={soeOpen} onOpenChange={setSoeOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Generate Statement of Expenditure</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-1.5 py-2">
+            <Label htmlFor="soeFy">Financial Year</Label>
+            <Select value={soeFy} onValueChange={setSoeFy}>
+              <SelectTrigger id="soeFy">
+                <SelectValue placeholder="Select year" />
+              </SelectTrigger>
+              <SelectContent>
+                {financialYears.map((fy) => (
+                  <SelectItem key={fy} value={fy}>{fy}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" disabled={generatingSOE}>Cancel</Button>
+            </DialogClose>
+            <Button onClick={handleGenerateSOE} disabled={generatingSOE || !soeFy}>
+              {generatingSOE ? "Generating…" : "Generate & Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── IMPORT DIALOG ── */}
       <Dialog open={importOpen} onOpenChange={handleImportOpenChange}>

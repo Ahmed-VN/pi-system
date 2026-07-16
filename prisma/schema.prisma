@@ -69,6 +69,44 @@ enum SourcingType {
   PROPRIETARY
 }
 
+// ============================================================
+// BANK STATEMENT MODULE — new enums
+// ============================================================
+
+enum BankName {
+  CANARA
+  SBI
+}
+
+enum ParsingStatus {
+  PENDING
+  PARSED
+  FAILED
+  NEEDS_REVIEW
+}
+
+enum TransactionCategory {
+  INTEREST
+  GRANT
+  BANK_CHARGE
+  TAX
+  REFUND
+  EXPENDITURE
+  UNCATEGORIZED
+}
+
+enum AllocationMethod {
+  PRO_RATA_BALANCE
+  MANUAL
+}
+
+enum MatchConfidence {
+  EXACT
+  LIKELY
+  UNCERTAIN
+  UNMATCHED
+}
+
 model User {
   id          String   @id @default(cuid())
   name        String
@@ -91,6 +129,10 @@ model User {
   anrfTemplates        AnrfTemplate[]
   procurementRequests  ProcurementRequest[] @relation("ProcurementSubmitter")
   approvedRequests     ProcurementRequest[] @relation("ProcurementApprover")
+  grantReleasesLogged GrantRelease[]
+
+  bankStatementsUploaded BankStatement[]
+  auditLogsPerformed     AuditLog[]
 
   @@map("users")
 }
@@ -120,6 +162,11 @@ model Project {
   threads             Thread[]
   assets              Asset[]
   procurementRequests ProcurementRequest[]
+  grantReleases GrantRelease[]
+
+  bankStatements   BankStatement[]
+  bankTransactions BankTransaction[]
+  auditLogs        AuditLog[]
 
   @@index([piId])
   @@index([status])
@@ -158,6 +205,8 @@ model Expenditure {
   budgetHead BudgetHead @relation(fields: [budgetHeadId], references: [id], onDelete: Cascade)
 
   paymentReleaseRequest PaymentReleaseRequest?
+
+  matchedBankTransactions BankTransaction[]
 
   @@index([projectId])
   @@map("expenditures")
@@ -389,4 +438,128 @@ model PaymentReleaseRequest {
   expenditure         Expenditure?       @relation(fields: [expenditureId], references: [id])
 
   @@map("payment_release_requests")
+}
+
+model GrantRelease {
+  id            String   @id @default(cuid())
+  projectId     String
+  sanctionNo    String
+  sanctionDate  DateTime
+  amount        Decimal  @db.Decimal(15, 2)
+  financialYear String   // e.g. "2025-2026"
+  remarks       String?
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  // Phase 1 additions — nullable, backward compatible with existing rows/routes
+  recurringAmount    Decimal? @db.Decimal(15, 2)
+  nonRecurringAmount Decimal? @db.Decimal(15, 2)
+  utr                String?
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([projectId])
+  @@index([financialYear])
+  @@map("grant_releases")
+}
+
+// ============================================================
+// BANK STATEMENT MODULE — new models (Phase 1)
+// ============================================================
+
+model BankStatement {
+  id                    String        @id @default(cuid())
+  projectId             String
+  bankName              BankName
+  accountNumber         String
+  statementPeriodStart  DateTime
+  statementPeriodEnd    DateTime
+  uploadedById          String
+  originalFileUrl       String
+  parsingStatus         ParsingStatus @default(PENDING)
+  parsingErrors         String?
+  openingBalance        Decimal?      @db.Decimal(15, 2)
+  closingBalance        Decimal?      @db.Decimal(15, 2)
+  createdAt             DateTime      @default(now())
+
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy   User              @relation(fields: [uploadedById], references: [id])
+  transactions BankTransaction[]
+
+  @@index([projectId])
+  @@map("bank_statements")
+}
+
+model BankTransaction {
+  id                   String              @id @default(cuid())
+  statementId          String
+  projectId            String
+  transactionDate      DateTime
+  narration            String
+  referenceNumber      String?
+  debit                Decimal?            @db.Decimal(15, 2)
+  credit               Decimal?            @db.Decimal(15, 2)
+  balance              Decimal             @db.Decimal(15, 2)
+  category             TransactionCategory @default(UNCATEGORIZED)
+  matchedExpenditureId String?
+  matchConfidence      MatchConfidence?
+  recurringShare       Decimal?            @db.Decimal(15, 2)
+  nonRecurringShare    Decimal?            @db.Decimal(15, 2)
+  createdAt            DateTime            @default(now())
+
+  statement          BankStatement        @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  matchedExpenditure Expenditure?         @relation(fields: [matchedExpenditureId], references: [id])
+  interestAllocation InterestAllocation?
+
+  @@index([statementId])
+  @@index([projectId])
+  @@index([category])
+  @@map("bank_transactions")
+}
+
+model InterestAllocation {
+  id                         String           @id @default(cuid())
+  bankTransactionId          String           @unique
+  recurringInterest          Decimal          @db.Decimal(15, 2)
+  nonRecurringInterest       Decimal          @db.Decimal(15, 2)
+  recurringBalanceBefore     Decimal          @db.Decimal(15, 2)
+  nonRecurringBalanceBefore  Decimal          @db.Decimal(15, 2)
+  allocationMethod           AllocationMethod @default(PRO_RATA_BALANCE)
+  calculatedAt               DateTime         @default(now())
+
+  bankTransaction BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
+
+  @@map("interest_allocations")
+}
+
+model CategorizationRule {
+  id        String              @id @default(cuid())
+  keyword   String              @unique
+  category  TransactionCategory
+  priority  Int                 @default(0)
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+
+  @@index([isActive])
+  @@map("categorization_rules")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  projectId     String?
+  entityType    String   // e.g. "BankTransaction", "InterestAllocation", "GrantRelease"
+  entityId      String
+  action        String   // e.g. "AUTO_CATEGORIZE", "AUTO_MATCH", "INTEREST_ALLOCATE", "UC_GENERATE"
+  formulaUsed   String?
+  performedById String?
+  createdAt     DateTime @default(now())
+
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  performedBy User?    @relation(fields: [performedById], references: [id])
+
+  @@index([projectId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
 }
